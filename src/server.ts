@@ -6,6 +6,9 @@ import dotenv from 'dotenv';
 import { connectMongoDB } from './config/mongodb';
 import authRoutes from './routes/auth.routes';
 import polygonRoutes from './routes/polygon.routes';
+import statesRoutes from './routes/states.routes';
+import areasRoutes from './routes/areas.routes';
+import ordersRoutes from './routes/orders.routes';
 
 // Load environment variables
 dotenv.config();
@@ -38,6 +41,9 @@ app.get('/health', (req, res) => {
 // API Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/polygons', polygonRoutes);
+app.use('/api/states', statesRoutes);
+app.use('/api/areas', areasRoutes);
+app.use('/api/orders', ordersRoutes);
 
 // 404 handler
 app.use((req, res) => {
