@@ -11,8 +11,9 @@ export interface IOrder extends Document {
   userId: mongoose.Types.ObjectId;
   state: string; // stateKey
   place: string; // areaKey
-  landSlotId: string;
-  expectedAmountUSDT: string; // String to avoid precision issues
+  landSlotIds: string[]; // Array of land slot IDs for multiple tiles
+  quantity: number; // Number of tiles in this order
+  expectedAmountUSDT: string; // String to avoid precision issues (total for all tiles)
   usdtAddress: string; // Fixed Ledger address
   network: string; // "TRC20"
   status: 'PENDING' | 'PAID' | 'FAILED';
@@ -45,11 +46,27 @@ const OrderSchema = new Schema<IOrder>(
       trim: true,
       index: true,
     },
-    landSlotId: {
-      type: String,
-      required: [true, 'Land slot ID is required'],
-      trim: true,
+    landSlotIds: {
+      type: [String],
+      required: [true, 'Land slot IDs are required'],
+      validate: {
+        validator: function(ids: string[]) {
+          return ids.length > 0;
+        },
+        message: 'At least one land slot ID is required',
+      },
       index: true,
+    },
+    quantity: {
+      type: Number,
+      required: [true, 'Quantity is required'],
+      min: [1, 'Quantity must be at least 1'],
+      validate: {
+        validator: function(this: IOrder, value: number) {
+          return value === this.landSlotIds.length;
+        },
+        message: 'Quantity must match the number of land slot IDs',
+      },
     },
     expectedAmountUSDT: {
       type: String,
@@ -114,8 +131,8 @@ const OrderSchema = new Schema<IOrder>(
 
 // Unique sparse index on txHash (allows multiple nulls, enforces uniqueness for non-null)
 OrderSchema.index({ txHash: 1 }, { unique: true, sparse: true });
-// Index on landSlotId for fast lookups
-OrderSchema.index({ landSlotId: 1 });
+// Index on landSlotIds for fast lookups
+OrderSchema.index({ landSlotIds: 1 });
 // Index on userId and status for user order queries
 OrderSchema.index({ userId: 1, status: 1 });
 

@@ -233,5 +233,79 @@ router.get('/:areaKey/available-slot', authenticate, async (req: AuthRequest, re
   }
 });
 
+// @route   GET /api/areas/:areaKey/available-slots
+// @desc    Get multiple available land slots for an area
+// @access  Private (requires authentication)
+router.get('/:areaKey/available-slots', authenticate, async (req: AuthRequest, res) => {
+  try {
+    const { areaKey } = req.params;
+    const quantity = parseInt(req.query.quantity as string) || 1;
+    const normalizedAreaKey = areaKey.toLowerCase().trim();
+
+    if (quantity < 1 || quantity > 100) {
+      return res.status(400).json({
+        success: false,
+        message: 'Quantity must be between 1 and 100',
+      });
+    }
+
+    // Find area to get stateKey
+    const area = await Area.findOne({
+      areaKey: normalizedAreaKey,
+      enabled: true,
+    });
+
+    if (!area) {
+      return res.status(404).json({
+        success: false,
+        message: 'Area not found or not enabled',
+      });
+    }
+
+    // Find available land slots (not SOLD, and either AVAILABLE or LOCKED with expired lock)
+    const availableSlots = await LandSlot.find({
+      areaKey: normalizedAreaKey,
+      stateKey: area.stateKey,
+      $or: [
+        { status: 'AVAILABLE' },
+        {
+          status: 'LOCKED',
+          lockExpiresAt: { $lt: new Date() }, // Lock expired
+        },
+      ],
+    })
+      .sort({ slotNumber: 1 }) // Get slots in order
+      .limit(quantity);
+
+    if (availableSlots.length < quantity) {
+      return res.status(404).json({
+        success: false,
+        message: `Only ${availableSlots.length} slot(s) available, but ${quantity} requested`,
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      landSlots: availableSlots.map((slot) => ({
+        landSlotId: slot.landSlotId,
+        stateKey: slot.stateKey,
+        stateName: slot.stateName,
+        areaKey: slot.areaKey,
+        areaName: slot.areaName,
+        slotNumber: slot.slotNumber,
+        status: slot.status,
+      })),
+      count: availableSlots.length,
+    });
+  } catch (error: any) {
+    console.error('Get available slots error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+    });
+  }
+});
+
 export default router;
 

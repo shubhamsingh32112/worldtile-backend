@@ -39,10 +39,13 @@ router.post(
       .trim()
       .notEmpty()
       .withMessage('Place (area) is required'),
-    body('landSlotId')
+    body('landSlotIds')
+      .isArray({ min: 1 })
+      .withMessage('Land slot IDs array is required with at least one slot'),
+    body('landSlotIds.*')
       .trim()
       .notEmpty()
-      .withMessage('Land slot ID is required'),
+      .withMessage('Each land slot ID must be non-empty'),
   ],
   validate,
   OrdersController.createOrder

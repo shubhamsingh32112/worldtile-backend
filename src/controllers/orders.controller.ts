@@ -15,13 +15,21 @@ export class OrdersController {
   static async createOrder(req: AuthRequest, res: Response): Promise<Response> {
     try {
       const userId = req.user!.id;
-      const { state, place, landSlotId } = req.body;
+      const { state, place, landSlotIds } = req.body;
+
+      // Validate landSlotIds is an array
+      if (!Array.isArray(landSlotIds) || landSlotIds.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'landSlotIds must be a non-empty array',
+        });
+      }
 
       const result = await OrdersService.createOrder(
         userId,
         state,
         place,
-        landSlotId
+        landSlotIds
       );
 
       return res.status(201).json({
@@ -33,9 +41,11 @@ export class OrdersController {
     } catch (error: any) {
       console.error('Create order error:', error);
 
-      // If order creation failed, release the lock
-      if (req.body.landSlotId) {
-        await LandSlotService.releaseLock(req.body.landSlotId);
+      // If order creation failed, release the locks for all slots
+      if (req.body.landSlotIds && Array.isArray(req.body.landSlotIds)) {
+        for (const slotId of req.body.landSlotIds) {
+          await LandSlotService.releaseLock(slotId);
+        }
       }
 
       // Determine status code based on error type
@@ -107,7 +117,8 @@ export class OrdersController {
           userId: order.userId,
           state: order.state,
           place: order.place,
-          landSlotId: order.landSlotId,
+          landSlotIds: order.landSlotIds,
+          quantity: order.quantity,
           expectedAmountUSDT: order.expectedAmountUSDT,
           usdtAddress: order.usdtAddress,
           network: order.network,
@@ -151,7 +162,8 @@ export class OrdersController {
           _id: order._id,
           state: order.state,
           place: order.place,
-          landSlotId: order.landSlotId,
+          landSlotIds: order.landSlotIds,
+          quantity: order.quantity,
           expectedAmountUSDT: order.expectedAmountUSDT,
           network: order.network,
           status: order.status,

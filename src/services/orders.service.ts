@@ -17,7 +17,7 @@ export class OrdersService {
    * @param userId - User ID
    * @param state - State key
    * @param place - Area key (place)
-   * @param landSlotId - Land slot ID
+   * @param landSlotIds - Array of land slot IDs
    * @returns Created order and payment details
    * @throws Error if validation fails or order creation fails
    */
@@ -25,7 +25,7 @@ export class OrdersService {
     userId: string,
     state: string,
     place: string,
-    landSlotId: string
+    landSlotIds: string[]
   ): Promise<{
     order: any;
     amount: string;
@@ -35,7 +35,12 @@ export class OrdersService {
     // Normalize inputs
     const normalizedState = state.toLowerCase().trim();
     const normalizedPlace = place.toLowerCase().trim();
-    const normalizedLandSlotId = landSlotId.trim();
+    const normalizedLandSlotIds = landSlotIds.map((id) => id.trim());
+
+    // Validate at least one slot
+    if (normalizedLandSlotIds.length === 0) {
+      throw new Error('At least one land slot ID is required');
+    }
 
     // Validate state exists
     const stateDoc = await State.findOne({
@@ -58,16 +63,20 @@ export class OrdersService {
       throw new Error('Area not found or not enabled');
     }
 
-    // Validate and lock land slot
-    await LandSlotService.validateAndLockSlot(
-      normalizedLandSlotId,
-      normalizedPlace,
-      normalizedState,
-      userId
-    );
+    // Validate and lock all land slots
+    for (const landSlotId of normalizedLandSlotIds) {
+      await LandSlotService.validateAndLockSlot(
+        landSlotId,
+        normalizedPlace,
+        normalizedState,
+        userId
+      );
+    }
 
-    // Calculate price server-side
-    const expectedAmountUSDT = await PricingService.calculateUSDTAmount(area);
+    // Calculate price server-side (price per tile * quantity)
+    const pricePerTile = await PricingService.calculateUSDTAmount(area);
+    const quantity = normalizedLandSlotIds.length;
+    const totalAmount = (parseFloat(pricePerTile) * quantity).toFixed(6);
     const usdtAddress = PricingService.getUSDTAddress();
 
     // Create order
@@ -75,8 +84,9 @@ export class OrdersService {
       userId: userId,
       state: normalizedState,
       place: normalizedPlace,
-      landSlotId: normalizedLandSlotId,
-      expectedAmountUSDT: expectedAmountUSDT,
+      landSlotIds: normalizedLandSlotIds,
+      quantity: quantity,
+      expectedAmountUSDT: totalAmount,
       usdtAddress: usdtAddress,
       network: 'TRC20',
       status: 'PENDING',
@@ -93,7 +103,7 @@ export class OrdersService {
 
     return {
       order,
-      amount: expectedAmountUSDT,
+      amount: totalAmount,
       address: usdtAddress,
       network: 'TRC20',
     };
@@ -285,9 +295,9 @@ export class OrdersService {
         { session, new: true }
       );
 
-      // Update land slot to SOLD and remove lock
-      await LandSlot.findOneAndUpdate(
-        { landSlotId: order.landSlotId },
+      // Update all land slots to SOLD and remove locks
+      await LandSlot.updateMany(
+        { landSlotId: { $in: order.landSlotIds } },
         {
           status: 'SOLD',
           lockedBy: null,
