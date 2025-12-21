@@ -11,11 +11,8 @@ export class PricingService {
    * @returns Expected USDT amount as string (6 decimal places)
    */
   static async calculateUSDTAmount(area: any): Promise<string> {
-    // Price is in rupees from Area model, convert to USDT
-    // TODO: Add actual USDT conversion rate if pricePerTile is in rupees
-    // For now, assuming pricePerTile is already in USDT or 1:1 conversion
-    const priceInRupees = area.pricePerTile;
-    const priceInUSDT = priceInRupees; // TODO: Add exchange rate conversion if needed
+    // Fixed price: 8 USDT per tile for all areas
+    const priceInUSDT = 8;
     
     // Return as string with 6 decimal places for USDT precision
     return priceInUSDT.toFixed(6);

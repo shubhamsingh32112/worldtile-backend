@@ -10,7 +10,8 @@
     "lint": "eslint src/**/*.ts",
     "test": "jest",
     "seed": "ts-node src/utils/seed.ts",
-    "seed:states": "ts-node src/utils/seedStatesAndAreas.ts"
+    "seed:states": "ts-node src/utils/seedStatesAndAreas.ts",
+    "backfill": "ts-node src/utils/backfillData.ts"
   },
   "keywords": [
     "metaverse",

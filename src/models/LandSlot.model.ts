@@ -10,6 +10,8 @@ export interface ILandSlot extends Document {
   status: 'AVAILABLE' | 'LOCKED' | 'SOLD';
   lockedBy?: mongoose.Types.ObjectId; // User ID who locked this slot
   lockExpiresAt?: Date; // When the lock expires (15 minutes from lock time)
+  ownerId?: mongoose.Types.ObjectId; // User ID who owns this slot (when SOLD)
+  ownedAt?: Date; // Timestamp when ownership was transferred
   createdAt: Date;
   updatedAt: Date;
 }
@@ -68,6 +70,15 @@ const LandSlotSchema = new Schema<ILandSlot>(
       type: Date,
       default: null,
     },
+    ownerId: {
+      type: Schema.Types.ObjectId,
+      ref: 'User',
+      default: null,
+    },
+    ownedAt: {
+      type: Date,
+      default: null,
+    },
   },
   {
     timestamps: true,
@@ -77,6 +88,8 @@ const LandSlotSchema = new Schema<ILandSlot>(
 // Compound index for finding available slots in an area
 LandSlotSchema.index({ areaKey: 1, status: 1 });
 LandSlotSchema.index({ status: 1, lockExpiresAt: 1 }); // For finding expired locks
+LandSlotSchema.index({ ownerId: 1 }); // For finding user's owned slots
+LandSlotSchema.index({ status: 1, ownerId: 1 }); // For finding user's SOLD slots
 
 export default mongoose.model<ILandSlot>('LandSlot', LandSlotSchema);
 

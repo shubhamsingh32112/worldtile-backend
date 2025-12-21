@@ -43,7 +43,7 @@ router.post(
         });
       }
 
-      const { name, email, password } = req.body;
+      const { name, email, password, referralCode } = req.body;
 
       // Check if user already exists
       const existingUser = await User.findOne({ email });
@@ -54,14 +54,57 @@ router.post(
         });
       }
 
+      // Handle referral code (if provided) - ONLY for new users
+      let referredBy = null;
+      if (referralCode) {
+        // Find referrer by referral code
+        const referrer = await User.findOne({ 
+          referralCode: referralCode.trim().toUpperCase() 
+        });
+        
+        if (referrer) {
+          // Hard rule: Cannot refer yourself
+          if (referrer.email.toLowerCase() === email.toLowerCase()) {
+            return res.status(400).json({
+              success: false,
+              message: 'Cannot refer yourself',
+            });
+          }
+          // Hard rule: Prevent referral loops (A → B → A)
+          if (referrer.referredBy) {
+            const referrerOfReferrer = await User.findById(referrer.referredBy);
+            if (referrerOfReferrer && referrerOfReferrer.email.toLowerCase() === email.toLowerCase()) {
+              return res.status(400).json({
+                success: false,
+                message: 'Referral loop detected',
+              });
+            }
+          }
+          referredBy = referrer._id;
+        } else {
+          // Invalid referral code - silently ignore (don't fail signup)
+          console.warn(`Invalid referral code provided: ${referralCode}`);
+        }
+      }
+
       // Create new user
       const user = new User({
         name,
         email,
         password,
+        referredBy: referredBy, // Set only once, immutable after save
       });
 
       await user.save();
+
+      // If user was referred, increment referrer's totalReferrals count
+      if (referredBy) {
+        const referrer = await User.findById(referredBy);
+        if (referrer && referrer.referralStats) {
+          referrer.referralStats.totalReferrals = (referrer.referralStats.totalReferrals || 0) + 1;
+          await referrer.save();
+        }
+      }
 
       // Generate token
       const token = generateToken(user._id.toString());
@@ -156,6 +199,136 @@ router.post(
   }
 );
 
+// @route   POST /api/auth/google
+// @desc    Authenticate with Google (Firebase)
+// @access  Public
+router.post(
+  '/google',
+  [
+    body('firebaseUid').notEmpty().withMessage('Firebase UID is required'),
+    body('email').isEmail().normalizeEmail().withMessage('Please provide a valid email'),
+    body('name').trim().notEmpty().withMessage('Name is required'),
+  ],
+  async (req, res) => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        return res.status(400).json({
+          success: false,
+          message: 'Validation failed',
+          errors: errors.array(),
+        });
+      }
+
+      const { firebaseUid, email, name, photoUrl, referralCode } = req.body;
+      const firebaseToken = req.header('Authorization')?.replace('Bearer ', '');
+
+      if (!firebaseToken) {
+        return res.status(401).json({
+          success: false,
+          message: 'Firebase token is required',
+        });
+      }
+
+      // Find user by Firebase UID or email
+      let user = await User.findOne({
+        $or: [{ firebaseUid }, { email: email.toLowerCase() }],
+      });
+
+      const isNewUser = !user;
+
+      if (user) {
+        // Update existing user (but NOT referredBy - it's immutable)
+        user.name = name;
+        user.email = email.toLowerCase();
+        user.firebaseUid = firebaseUid;
+        if (photoUrl) {
+          user.photoUrl = photoUrl;
+        }
+        await user.save();
+      } else {
+        // Handle referral code (if provided) - ONLY for new users
+        let referredBy = null;
+        if (referralCode) {
+          // Find referrer by referral code
+          const referrer = await User.findOne({ 
+            referralCode: referralCode.trim().toUpperCase() 
+          });
+          
+          if (referrer) {
+            // Hard rule: Cannot refer yourself
+            if (referrer.email.toLowerCase() === email.toLowerCase()) {
+              return res.status(400).json({
+                success: false,
+                message: 'Cannot refer yourself',
+              });
+            }
+            // Hard rule: Prevent referral loops (A → B → A)
+            // Check if referrer was referred by this email (would create loop)
+            if (referrer.referredBy) {
+              const referrerOfReferrer = await User.findById(referrer.referredBy);
+              if (referrerOfReferrer && referrerOfReferrer.email.toLowerCase() === email.toLowerCase()) {
+                return res.status(400).json({
+                  success: false,
+                  message: 'Referral loop detected',
+                });
+              }
+            }
+            referredBy = referrer._id;
+          } else {
+            // Invalid referral code - silently ignore (don't fail signup)
+            console.warn(`Invalid referral code provided: ${referralCode}`);
+          }
+        }
+
+        // Create new user
+        user = new User({
+          name,
+          email: email.toLowerCase(),
+          firebaseUid,
+          photoUrl: photoUrl || undefined,
+          referredBy: referredBy, // Set only once, immutable after save
+          // No password for Firebase-authenticated users
+        });
+        await user.save();
+
+        // If user was referred, increment referrer's totalReferrals count
+        if (referredBy) {
+          const referrer = await User.findById(referredBy);
+          if (referrer && referrer.referralStats) {
+            referrer.referralStats.totalReferrals = (referrer.referralStats.totalReferrals || 0) + 1;
+            await referrer.save();
+          }
+        }
+      }
+
+      // Generate JWT token
+      const token = generateToken(user._id.toString());
+
+      res.status(200).json({
+        success: true,
+        message: 'Authentication successful',
+        token,
+        user: {
+          id: user._id.toString(),
+          name: user.name,
+          email: user.email,
+          photoUrl: user.photoUrl,
+          firebaseUid: user.firebaseUid,
+          walletAddress: user.walletAddress,
+        },
+      });
+    } catch (error: any) {
+      console.error('Google auth error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Server error during authentication',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+      });
+    }
+  }
+);
+
 // @route   GET /api/auth/me
 // @desc    Get current user
 // @access  Private
@@ -176,6 +349,8 @@ router.get('/me', authenticate, async (req: AuthRequest, res) => {
         id: user._id.toString(),
         name: user.name,
         email: user.email,
+        photoUrl: user.photoUrl,
+        firebaseUid: user.firebaseUid,
         walletAddress: user.walletAddress,
       },
     });

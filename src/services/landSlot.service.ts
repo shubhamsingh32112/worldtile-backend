@@ -17,6 +17,7 @@ export class LandSlotService {
    * @param areaKey - Area key
    * @param stateKey - State key
    * @param userId - User ID requesting the lock
+   * @param lockExpiresAt - Optional lock expiry time (if not provided, uses default 15 minutes)
    * @returns Land slot document if successful
    * @throws Error if validation fails or slot cannot be locked
    */
@@ -24,7 +25,8 @@ export class LandSlotService {
     landSlotId: string,
     areaKey: string,
     stateKey: string,
-    userId: string
+    userId: string,
+    lockExpiresAt?: Date
   ): Promise<any> {
     // Find the land slot
     const landSlot = await LandSlot.findOne({
@@ -53,16 +55,19 @@ export class LandSlotService {
       // If locked by same user, allow re-locking (extend lock)
     }
 
-    // Apply soft lock
-    const lockExpiresAt = new Date();
-    lockExpiresAt.setMinutes(lockExpiresAt.getMinutes() + this.LOCK_DURATION_MINUTES);
+    // Apply soft lock - use provided expiry or default 15 minutes
+    const finalLockExpiresAt = lockExpiresAt || (() => {
+      const defaultExpiry = new Date();
+      defaultExpiry.setMinutes(defaultExpiry.getMinutes() + this.LOCK_DURATION_MINUTES);
+      return defaultExpiry;
+    })();
 
     const updatedSlot = await LandSlot.findOneAndUpdate(
       { landSlotId: landSlotId.trim() },
       {
         status: 'LOCKED',
         lockedBy: new mongoose.Types.ObjectId(userId),
-        lockExpiresAt: lockExpiresAt,
+        lockExpiresAt: finalLockExpiresAt,
       },
       { new: true }
     );

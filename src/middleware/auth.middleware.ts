@@ -7,6 +7,7 @@ export interface AuthRequest extends Request {
     id: string;
     email: string;
     name: string;
+    role?: 'USER' | 'AGENT' | 'ADMIN'; // Added by role middleware
   };
 }
 

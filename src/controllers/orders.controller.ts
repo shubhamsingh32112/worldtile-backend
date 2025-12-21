@@ -236,5 +236,58 @@ export class OrdersController {
       });
     }
   }
+
+  /**
+   * Auto-verify payment for an order by checking recent transactions
+   * POST /api/orders/auto-verify-payment
+   */
+  static async autoVerifyPayment(req: AuthRequest, res: Response): Promise<Response> {
+    try {
+      const userId = req.user!.id;
+      const { orderId } = req.body;
+
+      const result = await OrdersService.autoVerifyPayment(userId, orderId);
+
+      // If verification is pending (payment not found or insufficient confirmations), return 200 with pending status
+      if (!result.success) {
+        return res.status(200).json({
+          success: false,
+          status: result.status,
+          message: result.message,
+          confirmations: result.confirmations,
+        });
+      }
+
+      // Payment verified successfully
+      return res.status(200).json({
+        success: true,
+        status: result.status,
+        message: result.message,
+        confirmations: result.confirmations,
+        txHash: result.txHash,
+      });
+    } catch (error: any) {
+      console.error('Auto-verify payment error:', error);
+
+      // Determine status code based on error type
+      const statusCode = error.message.includes('not found') ||
+                        error.message.includes('already') ||
+                        error.message.includes('Cannot verify') ||
+                        error.message.includes('double-spend')
+        ? 400
+        : error.message.includes('pending') ||
+          error.message.includes('Awaiting confirmations') ||
+          error.message.includes('unavailable') ||
+          error.message.includes('timeout')
+        ? 200 // Return 200 for pending/awaiting cases
+        : 500;
+
+      return res.status(statusCode).json({
+        success: false,
+        message: error.message || 'Failed to auto-verify payment',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+      });
+    }
+  }
 }
 

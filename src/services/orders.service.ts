@@ -2,6 +2,7 @@ import Order from '../models/Order.model';
 import Area from '../models/Area.model';
 import State from '../models/State.model';
 import LandSlot from '../models/LandSlot.model';
+import User from '../models/User.model';
 import mongoose from 'mongoose';
 import { LandSlotService } from './landSlot.service';
 import { PricingService } from './pricing.service';
@@ -63,34 +64,77 @@ export class OrdersService {
       throw new Error('Area not found or not enabled');
     }
 
-    // Validate and lock all land slots
-    for (const landSlotId of normalizedLandSlotIds) {
-      await LandSlotService.validateAndLockSlot(
-        landSlotId,
-        normalizedPlace,
-        normalizedState,
-        userId
-      );
-    }
-
     // Calculate price server-side (price per tile * quantity)
     const pricePerTile = await PricingService.calculateUSDTAmount(area);
     const quantity = normalizedLandSlotIds.length;
     const totalAmount = (parseFloat(pricePerTile) * quantity).toFixed(6);
     const usdtAddress = PricingService.getUSDTAddress();
 
-    // Create order
+    // Create order with 15 minute expiry
+    const expiresAt = new Date();
+    expiresAt.setMinutes(expiresAt.getMinutes() + 15); // 15 minutes from now
+
+    // Get user to check referral info
+    const user = await User.findById(userId);
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    // Set up referral info (if user was referred)
+    let referralInfo: any = null;
+    if (user.referredBy) {
+      // Hard rule: Cannot refer yourself
+      if (user.referredBy.toString() === userId) {
+        throw new Error('Cannot refer yourself');
+      }
+
+      // Default commission rate is 25% (0.25)
+      const commissionRate = 0.25;
+      const commissionAmount = (parseFloat(totalAmount) * commissionRate).toFixed(6);
+
+      referralInfo = {
+        referrerId: user.referredBy,
+        commissionRate: commissionRate,
+        commissionRateAtPurchase: commissionRate, // Immutable snapshot
+        commissionAmountUSDT: commissionAmount,
+      };
+    }
+
+    // Validate and lock all land slots WITH order expiry time
+    // This ensures locks expire at the same time as the order
+    for (const landSlotId of normalizedLandSlotIds) {
+      await LandSlotService.validateAndLockSlot(
+        landSlotId,
+        normalizedPlace,
+        normalizedState,
+        userId,
+        expiresAt // Lock expires when order expires
+      );
+    }
+
+    // Create order with nested structures
     const order = new Order({
       userId: userId,
       state: normalizedState,
       place: normalizedPlace,
       landSlotIds: normalizedLandSlotIds,
       quantity: quantity,
-      expectedAmountUSDT: totalAmount,
       usdtAddress: usdtAddress,
       network: 'TRC20',
       status: 'PENDING',
+      // New nested structures
+      payment: {
+        expectedAmountUSDT: totalAmount,
+        confirmations: 0,
+      },
+      expiry: {
+        expiresAt: expiresAt,
+      },
+      referral: referralInfo,
+      // Legacy fields (for backward compatibility)
+      expectedAmountUSDT: totalAmount,
       confirmations: 0,
+      expiresAt: expiresAt,
       nft: {
         chain: null,
         contractAddress: null,
@@ -195,6 +239,7 @@ export class OrdersService {
    * @param orderId - Order ID
    * @returns Verification result
    * @throws Error if verification fails
+   * @deprecated This method now delegates to PaymentVerificationService.verifyAndFinalizeOrder
    */
   static async verifyPayment(
     userId: string,
@@ -205,7 +250,7 @@ export class OrdersService {
     message: string;
     confirmations?: number;
   }> {
-    // 1️⃣ Load Order
+    // Validate order exists and belongs to user
     const order = await Order.findOne({
       _id: orderId,
       userId: userId,
@@ -215,115 +260,90 @@ export class OrdersService {
       throw new Error('Order not found');
     }
 
-    // Ensure order status is PENDING
-    if (order.status !== 'PENDING') {
-      throw new Error(`Order is already ${order.status}. Cannot verify payment.`);
-    }
-
-    // Ensure txHash exists
-    if (!order.txHash) {
+    // Ensure txHash exists (for manual verification flow)
+    const txHash = order.payment?.txHash || order.txHash;
+    if (!txHash) {
       throw new Error('Transaction hash not found. Please submit transaction hash first.');
     }
 
-    // 2️⃣ Check for double-spend / replay attack
-    // Check if this txHash is already used in a PAID order
-    const existingPaidOrder = await Order.findOne({
-      txHash: order.txHash.trim(),
-      status: 'PAID',
-      _id: { $ne: orderId }, // Exclude current order
-    });
+    // Delegate to atomic verification function
+    return await PaymentVerificationService.verifyAndFinalizeOrder(orderId);
+  }
 
-    if (existingPaidOrder) {
-      // Mark current order as FAILED due to double-spend attempt
-      order.status = 'FAILED';
-      await order.save();
-      throw new Error('Transaction hash has already been used in another paid order (double-spend detected)');
-    }
-
-    // 3️⃣ Call TronGrid API and verify payment
-    let verificationResult;
+  /**
+   * Unlock land slots (idempotent)
+   * @param landSlotIds - Array of land slot IDs to unlock
+   */
+  private static async unlockLandSlots(landSlotIds: string[]): Promise<void> {
     try {
-      verificationResult = await PaymentVerificationService.verifyPayment(
-        order.txHash.trim(),
-        order.expectedAmountUSDT,
-        order.usdtAddress,
-        undefined // userWalletAddress - optional, not stored in order currently
-      );
-    } catch (error: any) {
-      // If verification fails, mark order as FAILED
-      order.status = 'FAILED';
-      await order.save();
-
-      // Check if it's a "pending" error (TronGrid down, insufficient confirmations, etc.)
-      if (error.message?.includes('pending') || error.message?.includes('Awaiting confirmations')) {
-        // Don't mark as FAILED for pending cases, just throw the error
-        order.status = 'PENDING'; // Revert status
-        await order.save();
-        throw error;
-      }
-
-      throw error;
-    }
-
-    // If verification succeeded but confirmations < 19, return awaiting message
-    if (!verificationResult.success) {
-      // Update confirmations count but keep status as PENDING
-      order.confirmations = verificationResult.confirmations;
-      await order.save();
-
-      return {
-        success: false,
-        status: 'PENDING',
-        message: verificationResult.message || `Awaiting confirmations: ${verificationResult.confirmations}/19`,
-        confirmations: verificationResult.confirmations,
-      };
-    }
-
-    // 4️⃣ Atomic Order Finalization using MongoDB transaction
-    const session = await mongoose.startSession();
-    session.startTransaction();
-
-    try {
-      // Update order to PAID
-      await Order.findOneAndUpdate(
-        { _id: orderId },
-        {
-          status: 'PAID',
-          paidAt: new Date(),
-          confirmations: verificationResult.confirmations,
-        },
-        { session, new: true }
-      );
-
-      // Update all land slots to SOLD and remove locks
       await LandSlot.updateMany(
-        { landSlotId: { $in: order.landSlotIds } },
+        { landSlotId: { $in: landSlotIds } },
         {
-          status: 'SOLD',
+          status: 'AVAILABLE',
           lockedBy: null,
           lockExpiresAt: null,
-        },
-        { session }
+        }
       );
+    } catch (error: any) {
+      console.error('Error unlocking land slots:', error);
+      // Don't throw - this should be idempotent
+    }
+  }
 
-      // Commit transaction
-      await session.commitTransaction();
-      session.endSession();
+  /**
+   * Auto-verify payment for an order by checking recent transactions
+   * Finds matching transaction by amount and automatically verifies it
+   * @param userId - User ID
+   * @param orderId - Order ID
+   * @returns Verification result
+   * @throws Error if verification fails
+   */
+  static async autoVerifyPayment(
+    userId: string,
+    orderId: string
+  ): Promise<{
+    success: boolean;
+    status: string;
+    message: string;
+    confirmations?: number;
+    txHash?: string;
+  }> {
+    // Validate order exists and belongs to user
+    const order = await Order.findOne({
+      _id: orderId,
+      userId: userId,
+    });
 
+    if (!order) {
+      throw new Error('Order not found');
+    }
+
+    // If already PAID, return success
+    if (order.status === 'PAID') {
+      const txHash = order.payment?.txHash || order.txHash;
       return {
         success: true,
         status: 'PAID',
-        message: 'Payment verified successfully',
-        confirmations: verificationResult.confirmations,
+        message: 'Payment already verified',
+        txHash: txHash || undefined,
       };
-    } catch (error: any) {
-      // Abort transaction on any error
-      await session.abortTransaction();
-      session.endSession();
-
-      // Order remains PENDING, LandSlot remains LOCKED
-      throw new Error(`Failed to finalize order: ${error.message}`);
     }
+
+    // Delegate to atomic verification function
+    // This will handle:
+    // - Expiry checks
+    // - Transaction detection
+    // - Payment verification
+    // - Order finalization
+    const result = await PaymentVerificationService.verifyAndFinalizeOrder(orderId);
+
+    // Get txHash from order if available
+    const txHash = order.payment?.txHash || order.txHash;
+
+    return {
+      ...result,
+      txHash: txHash || undefined,
+    };
   }
 }
 

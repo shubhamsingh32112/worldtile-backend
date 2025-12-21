@@ -95,6 +95,7 @@ router.get(
   '/:orderId',
   authenticate,
   OrdersController.getOrderById
+
 );
 
 /**
@@ -113,6 +114,24 @@ router.post(
   ],
   validate,
   OrdersController.verifyPayment
+);
+
+/**
+ * @route   POST /api/orders/auto-verify-payment
+ * @desc    Auto-verify payment by checking recent transactions to address
+ * @access  Private
+ */
+router.post(
+  '/auto-verify-payment',
+  authenticate,
+  [
+    body('orderId')
+      .trim()
+      .notEmpty()
+      .withMessage('Order ID is required'),
+  ],
+  validate,
+  OrdersController.autoVerifyPayment
 );
 
 export default router;
