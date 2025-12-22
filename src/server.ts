@@ -17,7 +17,6 @@ import deedsRoutes from './routes/deeds.routes';
 dotenv.config();
 
 const app = express();
-const PORT = Number(process.env.PORT) || 3000;
 
 // Middleware
 app.use(helmet());
@@ -57,6 +56,17 @@ app.use((req, _res, next) => {
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+// Middleware to ensure MongoDB connection (for serverless environments)
+app.use(async (_req, _res, next) => {
+  try {
+    await connectMongoDB();
+    next();
+  } catch (error) {
+    console.error('MongoDB connection error in middleware:', error);
+    next(error);
+  }
+});
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   const clientIp = req.ip || req.socket.remoteAddress || 'unknown';
@@ -67,6 +77,15 @@ app.get('/health', (req, res) => {
     timestamp: new Date().toISOString(),
     serverIp: req.socket.localAddress,
     clientIp: clientIp,
+  });
+});
+
+// API health check endpoint (for Vercel/monitoring)
+app.get('/api/health', (_req, res) => {
+  res.status(200).json({
+    status: 'ok',
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString()
   });
 });
 
@@ -98,42 +117,6 @@ app.use((err: any, _req: express.Request, res: express.Response, _next: express.
     ...(process.env.NODE_ENV === 'development' && { stack: err.stack }),
   });
 });
-
-// Start server
-const startServer = async () => {
-  try {
-    // Connect to MongoDB
-    await connectMongoDB();
-
-    // Listen on 0.0.0.0 to accept connections from other devices on the network
-    app.listen(PORT, '0.0.0.0', () => {
-      console.log(`🚀 Server running on port ${PORT}`);
-      console.log(`📡 Environment: ${process.env.NODE_ENV || 'development'}`);
-      console.log(`🌐 Server accessible at:`);
-      console.log(`   - http://localhost:${PORT}`);
-      console.log(`   - http://0.0.0.0:${PORT}`);
-      console.log(`   - Use your computer's IP address for mobile devices`);
-      console.log(`   - Example: http://192.168.1.XXX:${PORT}`);
-      console.log(`✅ Lazy order expiry enabled (orders expire on access)`);
-    });
-
-    // Graceful shutdown
-    process.on('SIGTERM', () => {
-      console.log('SIGTERM received, shutting down gracefully...');
-      process.exit(0);
-    });
-
-    process.on('SIGINT', () => {
-      console.log('SIGINT received, shutting down gracefully...');
-      process.exit(0);
-    });
-  } catch (error) {
-    console.error('Failed to start server:', error);
-    process.exit(1);
-  }
-};
-
-startServer();
 
 export default app;
 
