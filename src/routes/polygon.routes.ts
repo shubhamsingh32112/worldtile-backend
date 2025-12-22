@@ -43,15 +43,16 @@ router.post(
       .isLength({ max: 500 })
       .withMessage('Description cannot exceed 500 characters'),
   ],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: express.Response) => {
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
-        return res.status(400).json({
+        res.status(400).json({
           success: false,
           message: 'Validation failed',
           errors: errors.array(),
         });
+        return;
       }
 
       const { geometry, areaInAcres, name, description } = req.body;
@@ -96,15 +97,16 @@ router.post(
 // @desc    Get polygons near a location (using MongoDB geospatial query)
 // @access  Public
 // NOTE: This route must be defined before /:id to avoid route conflicts
-router.get('/nearby', async (req, res) => {
+router.get('/nearby', async (req: express.Request, res: express.Response): Promise<void> => {
   try {
     const { lat, lng, radius = 1000 } = req.query;
 
     if (!lat || !lng) {
-      return res.status(400).json({
+      res.status(400).json({
         success: false,
         message: 'Latitude and longitude are required',
       });
+      return;
     }
 
     const latitude = parseFloat(lat as string);
@@ -154,7 +156,7 @@ router.get('/nearby', async (req, res) => {
 // @route   GET /api/polygons
 // @desc    Get all polygons for the authenticated user
 // @access  Private
-router.get('/', authenticate, async (req: AuthRequest, res) => {
+router.get('/', authenticate, async (req: AuthRequest, res: express.Response): Promise<void> => {
   try {
     const userId = req.user!.id;
 
@@ -189,7 +191,7 @@ router.get('/', authenticate, async (req: AuthRequest, res) => {
 // @route   GET /api/polygons/:id
 // @desc    Get a specific polygon by ID
 // @access  Private
-router.get('/:id', authenticate, async (req: AuthRequest, res) => {
+router.get('/:id', authenticate, async (req: AuthRequest, res: express.Response): Promise<void> => {
   try {
     const { id } = req.params;
     const userId = req.user!.id;
@@ -197,10 +199,11 @@ router.get('/:id', authenticate, async (req: AuthRequest, res) => {
     const polygon = await Polygon.findOne({ _id: id, userId });
 
     if (!polygon) {
-      return res.status(404).json({
+      res.status(404).json({
         success: false,
         message: 'Polygon not found',
       });
+      return;
     }
 
     res.status(200).json({
@@ -219,10 +222,11 @@ router.get('/:id', authenticate, async (req: AuthRequest, res) => {
   } catch (error: any) {
     console.error('Get polygon error:', error);
     if (error.name === 'CastError') {
-      return res.status(400).json({
+      res.status(400).json({
         success: false,
         message: 'Invalid polygon ID',
       });
+      return;
     }
     res.status(500).json({
       success: false,
@@ -268,15 +272,16 @@ router.put(
       .isLength({ max: 500 })
       .withMessage('Description cannot exceed 500 characters'),
   ],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: express.Response): Promise<void> => {
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
-        return res.status(400).json({
+        res.status(400).json({
           success: false,
           message: 'Validation failed',
           errors: errors.array(),
         });
+        return;
       }
 
       const { id } = req.params;
@@ -286,10 +291,11 @@ router.put(
       const polygon = await Polygon.findOne({ _id: id, userId });
 
       if (!polygon) {
-        return res.status(404).json({
+        res.status(404).json({
           success: false,
           message: 'Polygon not found',
         });
+        return;
       }
 
       // Update fields
@@ -317,10 +323,11 @@ router.put(
     } catch (error: any) {
       console.error('Update polygon error:', error);
       if (error.name === 'CastError') {
-        return res.status(400).json({
+        res.status(400).json({
           success: false,
           message: 'Invalid polygon ID',
         });
+        return;
       }
       res.status(500).json({
         success: false,
@@ -334,7 +341,7 @@ router.put(
 // @route   DELETE /api/polygons/:id
 // @desc    Delete a polygon
 // @access  Private
-router.delete('/:id', authenticate, async (req: AuthRequest, res) => {
+router.delete('/:id', authenticate, async (req: AuthRequest, res: express.Response): Promise<void> => {
   try {
     const { id } = req.params;
     const userId = req.user!.id;
@@ -342,10 +349,11 @@ router.delete('/:id', authenticate, async (req: AuthRequest, res) => {
     const polygon = await Polygon.findOneAndDelete({ _id: id, userId });
 
     if (!polygon) {
-      return res.status(404).json({
+      res.status(404).json({
         success: false,
         message: 'Polygon not found',
       });
+      return;
     }
 
     res.status(200).json({
@@ -355,10 +363,11 @@ router.delete('/:id', authenticate, async (req: AuthRequest, res) => {
   } catch (error: any) {
     console.error('Delete polygon error:', error);
     if (error.name === 'CastError') {
-      return res.status(400).json({
+      res.status(400).json({
         success: false,
         message: 'Invalid polygon ID',
       });
+      return;
     }
     res.status(500).json({
       success: false,

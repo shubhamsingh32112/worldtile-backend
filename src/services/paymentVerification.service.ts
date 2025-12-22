@@ -3,29 +3,6 @@ import axios, { AxiosError } from 'axios';
 /**
  * TronGrid API Response Types
  */
-interface TronGridTransactionResponse {
-  ret: Array<{
-    contractRet: string;
-  }>;
-  block_timestamp?: number;
-  blockNumber?: number;
-  contract_address?: string;
-  receipt?: {
-    result?: string;
-  };
-  raw_data?: {
-    contract?: Array<{
-      parameter?: {
-        value?: {
-          to_address?: string;
-          amount?: number;
-          owner_address?: string;
-        };
-      };
-    }>;
-  };
-}
-
 interface TronGridTokenTransfer {
   transaction_id: string;
   token_info: {
@@ -38,29 +15,6 @@ interface TronGridTokenTransfer {
   value: string;
   block_timestamp: number;
   block: number;
-}
-
-interface TronGridTransactionDetailResponse {
-  ret: Array<{
-    contractRet: string;
-  }>;
-  block_timestamp: number;
-  blockNumber: number;
-  contract_address?: string;
-  receipt?: {
-    result?: string;
-  };
-  raw_data?: {
-    contract?: Array<{
-      parameter?: {
-        value?: {
-          to_address?: string;
-          amount?: number;
-          owner_address?: string;
-        };
-      };
-    }>;
-  };
 }
 
 /**
@@ -112,17 +66,6 @@ export class PaymentVerificationService {
   }
 
   /**
-   * Get ledger USDT address from environment
-   */
-  private static getLedgerAddress(): string {
-    const address = process.env.LEDGER_USDT_ADDRESS;
-    if (!address) {
-      throw new Error('LEDGER_USDT_ADDRESS not configured in environment variables');
-    }
-    return address;
-  }
-
-  /**
    * Get USDT TRC20 contract address from environment
    * Official TRON USDT (TRC20) contract: TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t
    */
@@ -143,54 +86,6 @@ export class PaymentVerificationService {
     
     // Always use the official contract address
     return OFFICIAL_USDT_CONTRACT;
-  }
-
-  /**
-   * Call TronGrid API to get transaction details
-   * @param txHash - Transaction hash
-   * @returns Transaction details from TronGrid
-   * @throws Error if API call fails or transaction not found
-   */
-  private static async fetchTransactionFromTronGrid(
-    txHash: string
-  ): Promise<TronGridTransactionDetailResponse> {
-    const apiKey = this.getApiKey();
-    const timeout = this.getTimeout();
-    const url = `${this.TRONGRID_BASE_URL}/transactions/${txHash}`;
-
-    try {
-      const response = await axios.get<TronGridTransactionDetailResponse>(url, {
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        timeout: timeout,
-      });
-
-      if (!response.data) {
-        throw new Error('TronGrid API returned empty response');
-      }
-
-      return response.data;
-    } catch (error) {
-      if (axios.isAxiosError(error)) {
-        const axiosError = error as AxiosError;
-        if (axiosError.response?.status === 404) {
-          throw new Error('Transaction not found on blockchain');
-        }
-        if (axiosError.response?.status === 429) {
-          throw new Error('TronGrid API rate limit exceeded. Please try again later.');
-        }
-        if (axiosError.code === 'ECONNABORTED' || axiosError.code === 'ETIMEDOUT') {
-          throw new Error('TronGrid API request timeout. Verification pending.');
-        }
-        if (axiosError.code === 'ECONNREFUSED' || axiosError.code === 'ENOTFOUND') {
-          throw new Error('TronGrid API unavailable. Verification pending.');
-        }
-        throw new Error(`TronGrid API error: ${axiosError.message}`);
-      }
-      throw new Error(`Failed to fetch transaction from TronGrid: ${error}`);
-    }
   }
 
   /**
@@ -309,7 +204,7 @@ export class PaymentVerificationService {
   static async findMatchingTransaction(
     expectedAmountUSDT: string,
     ledgerAddress: string,
-    orderId?: string,
+    _orderId?: string,
     orderCreatedAt?: Date
   ): Promise<TronGridTokenTransfer | null> {
     const apiKey = this.getApiKey();
@@ -641,10 +536,10 @@ export class PaymentVerificationService {
       };
     }
 
-    // Check if order has expired (now > expiresAt)
+    // Lazy expiry check - expire order if it has passed expiresAt
     const now = new Date();
     const expiresAt = order.expiry?.expiresAt || order.expiresAt;
-    if (expiresAt && now > expiresAt) {
+    if (order.status === 'PENDING' && expiresAt && now > expiresAt) {
       // Expire order and unlock slots
       order.status = 'EXPIRED';
       if (order.expiry) {
@@ -656,9 +551,11 @@ export class PaymentVerificationService {
       await LandSlot.updateMany(
         { landSlotId: { $in: order.landSlotIds } },
         {
-          status: 'AVAILABLE',
-          lockedBy: null,
-          lockExpiresAt: null,
+          $set: {
+            status: 'AVAILABLE',
+            lockedBy: null,
+            lockExpiresAt: null,
+          },
         }
       );
 
@@ -678,6 +575,10 @@ export class PaymentVerificationService {
     // Use event data only
     const expectedAmountUSDT = order.payment?.expectedAmountUSDT || order.expectedAmountUSDT;
     const ledgerAddress = order.usdtAddress;
+
+    if (!expectedAmountUSDT || !ledgerAddress) {
+      throw new Error('Order missing expectedAmountUSDT or usdtAddress');
+    }
 
     let matchingTransfer: TronGridTokenTransfer | null;
     try {

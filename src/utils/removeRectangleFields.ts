@@ -69,7 +69,7 @@ async function removeRectangleFields() {
         'rectangle',
       ];
       
-      const foundFields = rectangleFields.filter(field => doc[field] !== undefined);
+      const foundFields = rectangleFields.filter(field => (doc as any)[field] !== undefined);
       if (foundFields.length > 0) {
         console.log(`⚠️  Warning: Found remaining rectangle fields: ${foundFields.join(', ')}`);
       } else {

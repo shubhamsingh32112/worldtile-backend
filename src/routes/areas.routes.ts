@@ -45,6 +45,7 @@ router.get('/:areaKey', async (req, res) => {
       createdAt: area.createdAt,
       updatedAt: area.updatedAt,
     });
+    return;
   } catch (error: any) {
     console.error('Get area error:', error);
     res.status(500).json({
@@ -52,6 +53,7 @@ router.get('/:areaKey', async (req, res) => {
       message: 'Server error',
       error: process.env.NODE_ENV === 'development' ? error.message : undefined,
     });
+    return;
   }
 });
 
@@ -67,7 +69,7 @@ router.post(
       .isInt({ min: 1 })
       .withMessage('Quantity must be a positive integer'),
   ],
-  async (req: AuthRequest, res) => {
+  async (req: AuthRequest, res: express.Response) => {
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
@@ -159,6 +161,7 @@ router.post(
           totalPrice: quantity * updatedArea.pricePerTile,
         },
       });
+      return;
     } catch (error: any) {
       console.error('Buy tile error:', error);
       res.status(500).json({
@@ -166,6 +169,7 @@ router.post(
         message: 'Server error',
         error: process.env.NODE_ENV === 'development' ? error.message : undefined,
       });
+      return;
     }
   }
 );
@@ -173,7 +177,7 @@ router.post(
 // @route   GET /api/areas/:areaKey/available-slot
 // @desc    Get an available land slot for an area
 // @access  Private (requires authentication)
-router.get('/:areaKey/available-slot', authenticate, async (req: AuthRequest, res) => {
+router.get('/:areaKey/available-slot', authenticate, async (req: AuthRequest, res: express.Response): Promise<void> => {
   try {
     const { areaKey } = req.params;
     const normalizedAreaKey = areaKey.toLowerCase().trim();
@@ -185,10 +189,11 @@ router.get('/:areaKey/available-slot', authenticate, async (req: AuthRequest, re
     });
 
     if (!area) {
-      return res.status(404).json({
+      res.status(404).json({
         success: false,
         message: 'Area not found or not enabled',
       });
+      return;
     }
 
     // Find an available land slot (not SOLD, and either AVAILABLE or LOCKED with expired lock)
@@ -205,10 +210,11 @@ router.get('/:areaKey/available-slot', authenticate, async (req: AuthRequest, re
     }).sort({ slotNumber: 1 }); // Get the first available slot by slot number
 
     if (!availableSlot) {
-      return res.status(404).json({
+      res.status(404).json({
         success: false,
         message: 'No available land slots found for this area',
       });
+      return;
     }
 
     res.status(200).json({
@@ -236,17 +242,18 @@ router.get('/:areaKey/available-slot', authenticate, async (req: AuthRequest, re
 // @route   GET /api/areas/:areaKey/available-slots
 // @desc    Get multiple available land slots for an area
 // @access  Private (requires authentication)
-router.get('/:areaKey/available-slots', authenticate, async (req: AuthRequest, res) => {
+router.get('/:areaKey/available-slots', authenticate, async (req: AuthRequest, res: express.Response): Promise<void> => {
   try {
     const { areaKey } = req.params;
     const quantity = parseInt(req.query.quantity as string) || 1;
     const normalizedAreaKey = areaKey.toLowerCase().trim();
 
     if (quantity < 1 || quantity > 100) {
-      return res.status(400).json({
+      res.status(400).json({
         success: false,
         message: 'Quantity must be between 1 and 100',
       });
+      return;
     }
 
     // Find area to get stateKey
@@ -256,10 +263,11 @@ router.get('/:areaKey/available-slots', authenticate, async (req: AuthRequest, r
     });
 
     if (!area) {
-      return res.status(404).json({
+      res.status(404).json({
         success: false,
         message: 'Area not found or not enabled',
       });
+      return;
     }
 
     // Find available land slots (not SOLD, and either AVAILABLE or LOCKED with expired lock)
@@ -278,10 +286,11 @@ router.get('/:areaKey/available-slots', authenticate, async (req: AuthRequest, r
       .limit(quantity);
 
     if (availableSlots.length < quantity) {
-      return res.status(404).json({
+      res.status(404).json({
         success: false,
         message: `Only ${availableSlots.length} slot(s) available, but ${quantity} requested`,
       });
+      return;
     }
 
     res.status(200).json({

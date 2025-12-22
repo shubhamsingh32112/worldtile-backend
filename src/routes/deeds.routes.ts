@@ -10,7 +10,7 @@ const router = express.Router();
 // @route   GET /api/deeds/:propertyId
 // @desc    Get deed by property ID (landSlotId)
 // @access  Private (requires authentication)
-router.get('/:propertyId', authenticate, async (req: AuthRequest, res) => {
+router.get('/:propertyId', authenticate, async (req: AuthRequest, res: express.Response): Promise<void> => {
   try {
     const { propertyId } = req.params;
     const userId = req.user!.id;
@@ -19,10 +19,11 @@ router.get('/:propertyId', authenticate, async (req: AuthRequest, res) => {
     const landSlot = await LandSlot.findOne({ landSlotId: propertyId });
 
     if (!landSlot) {
-      return res.status(404).json({
+      res.status(404).json({
         success: false,
         message: 'Property not found',
       });
+      return;
     }
 
     // Validate user owns the property
@@ -32,20 +33,22 @@ router.get('/:propertyId', authenticate, async (req: AuthRequest, res) => {
     });
 
     if (!userLand) {
-      return res.status(403).json({
+      res.status(403).json({
         success: false,
         message: 'You do not own this property',
       });
+      return;
     }
 
     // Find the deed by propertyId (using LandSlot _id)
     const deed = await Deed.findOne({ propertyId: landSlot._id });
 
     if (!deed) {
-      return res.status(404).json({
+      res.status(404).json({
         success: false,
         message: 'Deed not found for this property',
       });
+      return;
     }
 
     // Return the deed document with success wrapper (standardized response format)

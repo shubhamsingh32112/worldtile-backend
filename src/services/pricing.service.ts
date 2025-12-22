@@ -1,5 +1,3 @@
-import Area from '../models/Area.model';
-
 /**
  * Pricing Service
  * Handles all price-related calculations
@@ -7,12 +5,11 @@ import Area from '../models/Area.model';
 export class PricingService {
   /**
    * Calculate USDT amount from area price
-   * @param area - Area document with pricePerTile
    * @returns Expected USDT amount as string (6 decimal places)
    */
-  static async calculateUSDTAmount(area: any): Promise<string> {
-    // Fixed price: 8 USDT per tile for all areas
-    const priceInUSDT = 8;
+  static async calculateUSDTAmount(): Promise<string> {
+    // Fixed price: 9 USDT per tile for all areas
+    const priceInUSDT = 9;
     
     // Return as string with 6 decimal places for USDT precision
     return priceInUSDT.toFixed(6);

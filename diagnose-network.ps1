@@ -14,11 +14,16 @@ if (-not $isAdmin) {
 
 # 1. Check IP Address
 Write-Host "1. IP Address:" -ForegroundColor Green
-$ip = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_.IPAddress -like '192.168.*' -and $_.PrefixOrigin -eq 'Dhcp'}).IPAddress
+$ip = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object {
+    ($_.IPAddress -like '192.168.*' -or $_.IPAddress -like '10.*' -or $_.IPAddress -like '172.16.*') -and 
+    $_.PrefixOrigin -eq 'Dhcp'
+} | Select-Object -First 1).IPAddress
 if ($ip) {
     Write-Host "   Computer IP: $ip" -ForegroundColor White
+    Write-Host "   Mobile app should use: http://$ip:3000/api" -ForegroundColor Cyan
 } else {
     Write-Host "   Could not find local IP address" -ForegroundColor Red
+    Write-Host "   Try running: ipconfig" -ForegroundColor Yellow
 }
 Write-Host ""
 

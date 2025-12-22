@@ -7,7 +7,7 @@ const router = express.Router();
 // @route   GET /api/states/:stateKey/areas
 // @desc    Get all areas for a specific state
 // @access  Public
-router.get('/:stateKey/areas', async (req, res) => {
+router.get('/:stateKey/areas', async (req: express.Request, res: express.Response): Promise<void> => {
   try {
     const { stateKey } = req.params;
     
@@ -21,10 +21,11 @@ router.get('/:stateKey/areas', async (req, res) => {
     });
     
     if (!state) {
-      return res.status(404).json({
+      res.status(404).json({
         success: false,
         message: 'State not found or not enabled',
       });
+      return;
     }
     
     // Get all enabled areas for this state

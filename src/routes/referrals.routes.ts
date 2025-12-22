@@ -2,7 +2,6 @@ import express from 'express';
 import { authenticate, AuthRequest } from '../middleware/auth.middleware';
 import User from '../models/User.model';
 import ReferralEarning from '../models/ReferralEarning.model';
-import Order from '../models/Order.model';
 import State from '../models/State.model';
 import Area from '../models/Area.model';
 import mongoose from 'mongoose';
@@ -14,17 +13,18 @@ const router = express.Router();
  * @desc    Get referral earnings with "real estate agent" feel
  * @access  Private
  */
-router.get('/earnings', authenticate, async (req: AuthRequest, res) => {
+router.get('/earnings', authenticate, async (req: AuthRequest, res: express.Response): Promise<void> => {
   try {
     const userId = req.user!.id;
 
     // Get user with referral stats
     const user = await User.findById(userId);
     if (!user) {
-      return res.status(404).json({
+      res.status(404).json({
         success: false,
         message: 'User not found',
       });
+      return;
     }
 
     // Get all referral earnings for this user

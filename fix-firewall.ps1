@@ -32,8 +32,24 @@ try {
         -Description "Allows Node.js backend server on port 3000 for mobile device testing"
     
     Write-Host "Firewall rule added successfully!" -ForegroundColor Green
-    Write-Host "`nYour phone should now be able to connect to:" -ForegroundColor Cyan
-    Write-Host "   http://192.168.1.15:3000/health" -ForegroundColor White
+    
+    # Get current IP address
+    $ip = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object {
+        ($_.IPAddress -like '192.168.*' -or $_.IPAddress -like '10.*') -and 
+        $_.PrefixOrigin -eq 'Dhcp'
+    } | Select-Object -First 1).IPAddress
+    
+    if ($ip) {
+        Write-Host "`nYour phone should now be able to connect to:" -ForegroundColor Cyan
+        Write-Host "   http://$ip:3000/health" -ForegroundColor White
+        Write-Host "   http://$ip:3000/api" -ForegroundColor White
+        Write-Host "`nUpdate your mobile app's .env file:" -ForegroundColor Yellow
+        Write-Host "   API_BASE_URL=http://$ip:3000/api" -ForegroundColor White
+    } else {
+        Write-Host "`nTo find your IP address, run: ipconfig" -ForegroundColor Yellow
+        Write-Host "Then update your mobile app's .env file with:" -ForegroundColor Yellow
+        Write-Host "   API_BASE_URL=http://YOUR_IP:3000/api" -ForegroundColor White
+    }
     Write-Host "`nTo verify, test from your phone's browser" -ForegroundColor Yellow
 }
 catch {

@@ -153,7 +153,7 @@ DeedSchema.index({ paymentTxHash: 1 }); // Quick lookup by payment transaction h
 DeedSchema.index({ landSlotId: 1, userId: 1 }); // Secure deed lookup (landSlotId + userId)
 
 // Prevent updates after creation (immutable)
-DeedSchema.pre(['updateOne', 'findOneAndUpdate', 'updateMany'], function (next) {
+DeedSchema.pre(['updateOne', 'findOneAndUpdate', 'updateMany'], function () {
   throw new Error('Deeds are immutable and cannot be updated');
 });
 

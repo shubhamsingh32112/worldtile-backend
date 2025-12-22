@@ -3,7 +3,6 @@ import Area from '../models/Area.model';
 import State from '../models/State.model';
 import LandSlot from '../models/LandSlot.model';
 import User from '../models/User.model';
-import mongoose from 'mongoose';
 import { LandSlotService } from './landSlot.service';
 import { PricingService } from './pricing.service';
 import { PaymentVerificationService } from './paymentVerification.service';
@@ -13,6 +12,40 @@ import { PaymentVerificationService } from './paymentVerification.service';
  * Handles order business logic
  */
 export class OrdersService {
+  /**
+   * Lazy expiry check - expires order if it has passed expiresAt
+   * This is called whenever an order is accessed, ensuring expired orders
+   * are marked as EXPIRED without needing a background worker
+   * @param order - Order document to check
+   * @throws Error if order is expired (with message 'Order expired')
+   */
+  private static async checkAndExpireOrder(order: any): Promise<void> {
+    // Only check PENDING orders
+    if (order.status !== 'PENDING') {
+      return;
+    }
+
+    const now = new Date();
+    const expiresAt = order.expiry?.expiresAt || order.expiresAt;
+
+    if (!expiresAt) {
+      return; // No expiry set, skip check
+    }
+
+    if (now > expiresAt) {
+      // Order has expired - expire it NOW
+      order.status = 'EXPIRED';
+      if (order.expiry) {
+        order.expiry.expiredAt = now;
+      }
+      await order.save();
+
+      // Unlock land slots
+      await this.unlockLandSlots(order.landSlotIds);
+
+      throw new Error('Order expired. Payment window has closed. Slots have been released.');
+    }
+  }
   /**
    * Create a new order
    * @param userId - User ID
@@ -65,7 +98,7 @@ export class OrdersService {
     }
 
     // Calculate price server-side (price per tile * quantity)
-    const pricePerTile = await PricingService.calculateUSDTAmount(area);
+    const pricePerTile = await PricingService.calculateUSDTAmount();
     const quantity = normalizedLandSlotIds.length;
     const totalAmount = (parseFloat(pricePerTile) * quantity).toFixed(6);
     const usdtAddress = PricingService.getUSDTAddress();
@@ -176,7 +209,11 @@ export class OrdersService {
       throw new Error('Order not found');
     }
 
-    // Validate order status is PENDING
+    // Lazy expiry check - expire if needed
+    await this.checkAndExpireOrder(order);
+    // Note: If expired, checkAndExpireOrder throws, so we won't reach here
+
+    // Validate order status is PENDING (should still be PENDING after expiry check)
     if (order.status !== 'PENDING') {
       throw new Error(`Cannot submit transaction hash. Order status is ${order.status}`);
     }
@@ -215,6 +252,18 @@ export class OrdersService {
       throw new Error('Order not found');
     }
 
+    // Lazy expiry check - expire if needed (non-blocking for GET requests)
+    // If expired, we still return the order with EXPIRED status for frontend handling
+    try {
+      await this.checkAndExpireOrder(order);
+    } catch (error: any) {
+      // Order was expired and status updated, reload to get fresh status (with userId check)
+      return await Order.findOne({
+        _id: orderId,
+        userId: userId,
+      }) || order;
+    }
+
     return order;
   }
 
@@ -230,6 +279,19 @@ export class OrdersService {
       query.status = status;
     }
 
+    const orders = await Order.find(query).sort({ createdAt: -1 });
+
+    // Lazy expiry check - expire any expired PENDING orders (non-blocking)
+    for (const order of orders) {
+      try {
+        await this.checkAndExpireOrder(order);
+      } catch (error: any) {
+        // Order was expired, continue with next order
+        // The order status has been updated to EXPIRED in the DB
+      }
+    }
+
+    // Reload orders to get updated statuses
     return await Order.find(query).sort({ createdAt: -1 });
   }
 
@@ -259,6 +321,10 @@ export class OrdersService {
     if (!order) {
       throw new Error('Order not found');
     }
+
+    // Lazy expiry check - expire if needed
+    await this.checkAndExpireOrder(order);
+    // Note: If expired, checkAndExpireOrder throws, so we won't reach here
 
     // Ensure txHash exists (for manual verification flow)
     const txHash = order.payment?.txHash || order.txHash;
@@ -318,6 +384,18 @@ export class OrdersService {
       throw new Error('Order not found');
     }
 
+    // Lazy expiry check - expire if needed
+    try {
+      await this.checkAndExpireOrder(order);
+    } catch (error: any) {
+      // Order expired - return expired status
+      return {
+        success: false,
+        status: 'EXPIRED',
+        message: error.message || 'Order expired',
+      };
+    }
+
     // If already PAID, return success
     if (order.status === 'PAID') {
       const txHash = order.payment?.txHash || order.txHash;
@@ -331,10 +409,10 @@ export class OrdersService {
 
     // Delegate to atomic verification function
     // This will handle:
-    // - Expiry checks
     // - Transaction detection
     // - Payment verification
     // - Order finalization
+    // Note: Expiry already checked above
     const result = await PaymentVerificationService.verifyAndFinalizeOrder(orderId);
 
     // Get txHash from order if available

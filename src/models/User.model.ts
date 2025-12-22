@@ -18,6 +18,7 @@ export interface IUser extends Document {
   password?: string;
   firebaseUid?: string;
   photoUrl?: string;
+  phoneNumber?: string;
   walletAddress?: string;
   role: 'USER' | 'AGENT' | 'ADMIN'; // User role (default: USER)
   referralCode?: string; // Auto-generated unique code
@@ -58,6 +59,10 @@ const UserSchema = new Schema<IUser>(
       trim: true,
     },
     photoUrl: {
+      type: String,
+      trim: true,
+    },
+    phoneNumber: {
       type: String,
       trim: true,
     },
@@ -120,6 +125,35 @@ const UserSchema = new Schema<IUser>(
   }
 );
 
+/**
+ * Generate referral code in format: WT-XXXXYN
+ * Where:
+ * - WT = World Tile (fixed prefix)
+ * - XXXX = first 4 letters of user's name (uppercase, padded with X if needed)
+ * - Y = random number (0-9)
+ * - N = random letter (A-Z)
+ * 
+ * Example: WT-SHUB7A, WT-RAJU4K, WT-ANIL9Q
+ */
+function generateReferralCode(userName: string): string {
+  const prefix = 'WT';
+  
+  // Take first 4 letters, remove non-alphabetic characters, uppercase, pad if needed
+  const namePart = userName
+    .replace(/[^a-zA-Z]/g, '') // Remove non-alphabetic characters
+    .toUpperCase()
+    .padEnd(4, 'X') // Pad with X if name is shorter than 4 characters
+    .slice(0, 4); // Take only first 4 characters
+  
+  // Random number (0-9)
+  const randomNumber = Math.floor(Math.random() * 10);
+  
+  // Random letter (A-Z)
+  const randomLetter = String.fromCharCode(65 + Math.floor(Math.random() * 26));
+  
+  return `${prefix}-${namePart}${randomNumber}${randomLetter}`;
+}
+
 // Generate referral code before saving (if new user and no code exists)
 UserSchema.pre('save', async function (next) {
   // Generate referral code if it doesn't exist
@@ -128,14 +162,9 @@ UserSchema.pre('save', async function (next) {
     let isUnique = false;
     const UserModel = this.constructor as typeof mongoose.Model;
     
-    // Generate a short, unique code (6-8 characters, uppercase alphanumeric)
+    // Generate code in format WT-XXXXYN and ensure uniqueness
     while (!isUnique) {
-      // Generate random code: 6-8 chars, uppercase alphanumeric
-      const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Exclude ambiguous chars
-      code = '';
-      for (let i = 0; i < 8; i++) {
-        code += chars.charAt(Math.floor(Math.random() * chars.length));
-      }
+      code = generateReferralCode(this.name);
       
       // Check if code already exists
       const existing = await UserModel.findOne({ referralCode: code });

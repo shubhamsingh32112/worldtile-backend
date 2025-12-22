@@ -12,7 +12,6 @@ import ordersRoutes from './routes/orders.routes';
 import userRoutes from './routes/user.routes';
 import referralsRoutes from './routes/referrals.routes';
 import deedsRoutes from './routes/deeds.routes';
-import { OrderExpiryService } from './services/orderExpiry.service';
 
 // Load environment variables
 dotenv.config();
@@ -23,15 +22,34 @@ const PORT = Number(process.env.PORT) || 3000;
 // Middleware
 app.use(helmet());
 // CORS configuration - allow all origins in development for mobile device testing
+const allowedOrigins = process.env.CORS_ORIGIN
+  ? process.env.CORS_ORIGIN.split(',').map((origin) => origin.trim())
+  : ['http://localhost:5173', 'http://localhost:3000', '*']; // Default: allow Vite dev server and all origins
+
 app.use(cors({
-  origin: process.env.CORS_ORIGIN || '*', // Allow all origins in development
+  origin: (origin, callback) => {
+    // Allow requests with no origin (like mobile apps or Postman)
+    if (!origin) return callback(null, true);
+    
+    // In development, allow all origins if CORS_ORIGIN is not set
+    if (!process.env.CORS_ORIGIN && process.env.NODE_ENV !== 'production') {
+      return callback(null, true);
+    }
+    
+    // Check if origin is in allowed list
+    if (allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
+      callback(null, true);
+    } else {
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
 }));
 app.use(morgan('dev'));
 // Custom logging middleware to track all incoming requests
-app.use((req, res, next) => {
+app.use((req, _res, next) => {
   const clientIp = req.ip || req.socket.remoteAddress || req.headers['x-forwarded-for'] || 'unknown';
   console.log(`[REQUEST] ${req.method} ${req.path} from ${clientIp}`);
   next();
@@ -64,7 +82,7 @@ app.use('/api/referrals', referralsRoutes);
 app.use('/api/deeds', deedsRoutes);
 
 // 404 handler
-app.use((req, res) => {
+app.use((_req, res) => {
   res.status(404).json({
     success: false,
     message: 'Route not found',
@@ -72,7 +90,7 @@ app.use((req, res) => {
 });
 
 // Error handler
-app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   console.error('Error:', err);
   res.status(err.status || 500).json({
     success: false,
@@ -87,9 +105,6 @@ const startServer = async () => {
     // Connect to MongoDB
     await connectMongoDB();
 
-    // Start order expiry worker (runs every 1 minute)
-    const expiryWorkerInterval = OrderExpiryService.startWorker(1);
-
     // Listen on 0.0.0.0 to accept connections from other devices on the network
     app.listen(PORT, '0.0.0.0', () => {
       console.log(`🚀 Server running on port ${PORT}`);
@@ -99,19 +114,17 @@ const startServer = async () => {
       console.log(`   - http://0.0.0.0:${PORT}`);
       console.log(`   - Use your computer's IP address for mobile devices`);
       console.log(`   - Example: http://192.168.1.XXX:${PORT}`);
-      console.log(`⏰ Order expiry worker started (interval: 1 minute)`);
+      console.log(`✅ Lazy order expiry enabled (orders expire on access)`);
     });
 
-    // Graceful shutdown - stop expiry worker
+    // Graceful shutdown
     process.on('SIGTERM', () => {
       console.log('SIGTERM received, shutting down gracefully...');
-      OrderExpiryService.stopWorker(expiryWorkerInterval);
       process.exit(0);
     });
 
     process.on('SIGINT', () => {
       console.log('SIGINT received, shutting down gracefully...');
-      OrderExpiryService.stopWorker(expiryWorkerInterval);
       process.exit(0);
     });
   } catch (error) {

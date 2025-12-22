@@ -8,12 +8,14 @@ const router = express.Router();
 
 // Generate JWT token
 const generateToken = (userId: string): string => {
+  const secret = process.env.JWT_SECRET || 'your-secret-key';
+  const expiresIn = process.env.JWT_EXPIRE || '7d';
   return jwt.sign(
     { userId },
-    process.env.JWT_SECRET || 'your-secret-key',
+    secret,
     {
-      expiresIn: process.env.JWT_EXPIRE || '7d',
-    }
+      expiresIn: expiresIn,
+    } as jwt.SignOptions
   );
 };
 
@@ -32,15 +34,16 @@ router.post(
       .isLength({ min: 6 })
       .withMessage('Password must be at least 6 characters'),
   ],
-  async (req, res) => {
+  async (req: express.Request, res: express.Response): Promise<void> => {
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
-        return res.status(400).json({
+        res.status(400).json({
           success: false,
           message: 'Validation failed',
           errors: errors.array(),
         });
+        return;
       }
 
       const { name, email, password, referralCode } = req.body;
@@ -48,10 +51,11 @@ router.post(
       // Check if user already exists
       const existingUser = await User.findOne({ email });
       if (existingUser) {
-        return res.status(400).json({
+        res.status(400).json({
           success: false,
           message: 'User with this email already exists',
         });
+        return;
       }
 
       // Handle referral code (if provided) - ONLY for new users
@@ -65,19 +69,21 @@ router.post(
         if (referrer) {
           // Hard rule: Cannot refer yourself
           if (referrer.email.toLowerCase() === email.toLowerCase()) {
-            return res.status(400).json({
+            res.status(400).json({
               success: false,
               message: 'Cannot refer yourself',
             });
+            return;
           }
           // Hard rule: Prevent referral loops (A → B → A)
           if (referrer.referredBy) {
             const referrerOfReferrer = await User.findById(referrer.referredBy);
             if (referrerOfReferrer && referrerOfReferrer.email.toLowerCase() === email.toLowerCase()) {
-              return res.status(400).json({
+              res.status(400).json({
                 success: false,
                 message: 'Referral loop detected',
               });
+              return;
             }
           }
           referredBy = referrer._id;
@@ -142,15 +148,16 @@ router.post(
       .withMessage('Please provide a valid email'),
     body('password').notEmpty().withMessage('Password is required'),
   ],
-  async (req, res) => {
+  async (req: express.Request, res: express.Response): Promise<void> => {
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
-        return res.status(400).json({
+        res.status(400).json({
           success: false,
           message: 'Validation failed',
           errors: errors.array(),
         });
+        return;
       }
 
       const { email, password } = req.body;
@@ -159,20 +166,22 @@ router.post(
       const user = await User.findOne({ email });
 
       if (!user) {
-        return res.status(401).json({
+        res.status(401).json({
           success: false,
           message: 'Invalid email or password',
         });
+        return;
       }
 
       // Check password
       const isPasswordValid = await user.comparePassword(password);
 
       if (!isPasswordValid) {
-        return res.status(401).json({
+        res.status(401).json({
           success: false,
           message: 'Invalid email or password',
         });
+        return;
       }
 
       // Generate token
@@ -209,33 +218,33 @@ router.post(
     body('email').isEmail().normalizeEmail().withMessage('Please provide a valid email'),
     body('name').trim().notEmpty().withMessage('Name is required'),
   ],
-  async (req, res) => {
+  async (req: express.Request, res: express.Response): Promise<void> => {
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
-        return res.status(400).json({
+        res.status(400).json({
           success: false,
           message: 'Validation failed',
           errors: errors.array(),
         });
+        return;
       }
 
       const { firebaseUid, email, name, photoUrl, referralCode } = req.body;
       const firebaseToken = req.header('Authorization')?.replace('Bearer ', '');
 
       if (!firebaseToken) {
-        return res.status(401).json({
+        res.status(401).json({
           success: false,
           message: 'Firebase token is required',
         });
+        return;
       }
 
       // Find user by Firebase UID or email
       let user = await User.findOne({
         $or: [{ firebaseUid }, { email: email.toLowerCase() }],
       });
-
-      const isNewUser = !user;
 
       if (user) {
         // Update existing user (but NOT referredBy - it's immutable)
@@ -258,20 +267,22 @@ router.post(
           if (referrer) {
             // Hard rule: Cannot refer yourself
             if (referrer.email.toLowerCase() === email.toLowerCase()) {
-              return res.status(400).json({
+              res.status(400).json({
                 success: false,
                 message: 'Cannot refer yourself',
               });
+              return;
             }
             // Hard rule: Prevent referral loops (A → B → A)
             // Check if referrer was referred by this email (would create loop)
             if (referrer.referredBy) {
               const referrerOfReferrer = await User.findById(referrer.referredBy);
               if (referrerOfReferrer && referrerOfReferrer.email.toLowerCase() === email.toLowerCase()) {
-                return res.status(400).json({
+                res.status(400).json({
                   success: false,
                   message: 'Referral loop detected',
                 });
+                return;
               }
             }
             referredBy = referrer._id;
@@ -332,15 +343,16 @@ router.post(
 // @route   GET /api/auth/me
 // @desc    Get current user
 // @access  Private
-router.get('/me', authenticate, async (req: AuthRequest, res) => {
+router.get('/me', authenticate, async (req: AuthRequest, res: express.Response): Promise<void> => {
   try {
     const user = await User.findById(req.user!.id);
 
     if (!user) {
-      return res.status(404).json({
+      res.status(404).json({
         success: false,
         message: 'User not found',
       });
+      return;
     }
 
     res.status(200).json({

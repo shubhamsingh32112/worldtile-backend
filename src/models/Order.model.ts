@@ -24,6 +24,7 @@ export interface IExpiry {
 export interface IReferral {
   referrerId?: mongoose.Types.ObjectId; // User who referred the buyer
   commissionRate?: number; // Commission rate (e.g., 0.25 for 25%)
+  commissionRateAtPurchase?: number; // Commission rate at time of purchase (for historical tracking)
   commissionAmountUSDT?: string; // Calculated commission amount
 }
 
