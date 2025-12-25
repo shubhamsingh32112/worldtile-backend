@@ -7,7 +7,7 @@ export class AdminController {
    * GET /api/admin/stats/overview
    * Get dashboard overview statistics
    */
-  static async getOverviewStats(req: AuthRequest, res: Response): Promise<Response> {
+  static async getOverviewStats(_req: AuthRequest, res: Response): Promise<Response> {
     try {
       const stats = await AdminService.fetchStats();
       return res.status(200).json({
