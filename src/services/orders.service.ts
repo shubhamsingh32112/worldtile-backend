@@ -51,7 +51,7 @@ export class OrdersService {
    * @param userId - User ID
    * @param state - State key
    * @param place - Area key (place)
-   * @param landSlotIds - Array of land slot IDs
+   * @param quantity - Number of slots to purchase (backend will atomically assign slots)
    * @returns Created order and payment details
    * @throws Error if validation fails or order creation fails
    */
@@ -59,21 +59,21 @@ export class OrdersService {
     userId: string,
     state: string,
     place: string,
-    landSlotIds: string[]
+    quantity: number
   ): Promise<{
     order: any;
     amount: string;
     address: string;
     network: string;
+    assignedSlots: string[];
   }> {
     // Normalize inputs
     const normalizedState = state.toLowerCase().trim();
     const normalizedPlace = place.toLowerCase().trim();
-    const normalizedLandSlotIds = landSlotIds.map((id) => id.trim());
 
-    // Validate at least one slot
-    if (normalizedLandSlotIds.length === 0) {
-      throw new Error('At least one land slot ID is required');
+    // Validate quantity
+    if (!quantity || quantity < 1 || quantity > 100) {
+      throw new Error('Quantity must be between 1 and 100');
     }
 
     // Validate state exists
@@ -99,7 +99,6 @@ export class OrdersService {
 
     // Calculate price server-side (price per tile * quantity)
     const pricePerTile = await PricingService.calculateUSDTAmount();
-    const quantity = normalizedLandSlotIds.length;
     const totalAmount = (parseFloat(pricePerTile) * quantity).toFixed(6);
     const usdtAddress = PricingService.getUSDTAddress();
 
@@ -133,24 +132,22 @@ export class OrdersService {
       };
     }
 
-    // Validate and lock all land slots WITH order expiry time
-    // This ensures locks expire at the same time as the order
-    for (const landSlotId of normalizedLandSlotIds) {
-      await LandSlotService.validateAndLockSlot(
-        landSlotId,
-        normalizedPlace,
-        normalizedState,
-        userId,
-        expiresAt // Lock expires when order expires
-      );
-    }
+    // Atomically allot and lock slots
+    // This prevents race conditions when multiple users click simultaneously
+    const { assignedSlots } = await LandSlotService.allotSlotsForOrder(
+      normalizedState,
+      normalizedPlace,
+      quantity,
+      userId,
+      expiresAt // Lock expires when order expires
+    );
 
     // Create order with nested structures
     const order = new Order({
       userId: userId,
       state: normalizedState,
       place: normalizedPlace,
-      landSlotIds: normalizedLandSlotIds,
+      landSlotIds: assignedSlots, // Use atomically assigned slots
       quantity: quantity,
       usdtAddress: usdtAddress,
       network: 'TRC20',
@@ -183,6 +180,7 @@ export class OrdersService {
       amount: totalAmount,
       address: usdtAddress,
       network: 'TRC20',
+      assignedSlots, // Return assigned slots for frontend reference
     };
   }
 

@@ -1,7 +1,6 @@
 import { Response } from 'express';
 import { AuthRequest } from '../middleware/auth.middleware';
 import { OrdersService } from '../services/orders.service';
-import { LandSlotService } from '../services/landSlot.service';
 
 /**
  * Orders Controller
@@ -11,17 +10,27 @@ export class OrdersController {
   /**
    * Create a new order
    * POST /api/orders/create
+   * @body { state: string, place: string, quantity: number }
+   * Backend atomically assigns slots to prevent race conditions
    */
   static async createOrder(req: AuthRequest, res: Response): Promise<Response> {
     try {
       const userId = req.user!.id;
-      const { state, place, landSlotIds } = req.body;
+      const { state, place, quantity } = req.body;
 
-      // Validate landSlotIds is an array
-      if (!Array.isArray(landSlotIds) || landSlotIds.length === 0) {
+      // Validate quantity
+      if (!quantity || typeof quantity !== 'number' || quantity < 1 || quantity > 100) {
         return res.status(400).json({
           success: false,
-          message: 'landSlotIds must be a non-empty array',
+          message: 'quantity must be a number between 1 and 100',
+        });
+      }
+
+      // Validate state and place
+      if (!state || !place) {
+        return res.status(400).json({
+          success: false,
+          message: 'state and place are required',
         });
       }
 
@@ -29,7 +38,7 @@ export class OrdersController {
         userId,
         state,
         place,
-        landSlotIds
+        quantity
       );
 
       return res.status(201).json({
@@ -37,32 +46,35 @@ export class OrdersController {
         amount: result.amount,
         address: result.address,
         network: result.network,
+        assignedSlots: result.assignedSlots, // Return assigned slots for reference
       });
     } catch (error: any) {
-      console.error('Create order error:', error);
+      // Use status code from AppError if available, otherwise determine from message
+      const statusCode = error.statusCode || error.status || 
+        (error.message.includes('not found') ||
+         error.message.includes('not enabled') ||
+         error.message.includes('already sold') ||
+         error.message.includes('locked by another')
+          ? 400
+          : error.message.includes('not configured')
+          ? 500
+          : 500);
 
-      // If order creation failed, release the locks for all slots
-      if (req.body.landSlotIds && Array.isArray(req.body.landSlotIds)) {
-        for (const slotId of req.body.landSlotIds) {
-          await LandSlotService.releaseLock(slotId);
-        }
-      }
-
-      // Determine status code based on error type
-      const statusCode = error.message.includes('not found') ||
-                        error.message.includes('not enabled') ||
-                        error.message.includes('already sold') ||
-                        error.message.includes('locked by another')
-        ? 400
-        : error.message.includes('not configured')
-        ? 500
-        : 500;
-
-      return res.status(statusCode).json({
+      // Include metadata if available (for 409 conflicts)
+      const responseBody: any = {
         success: false,
         message: error.message || 'Failed to create order',
-        error: process.env.NODE_ENV === 'development' ? error.message : undefined,
-      });
+      };
+
+      if (error.meta) {
+        responseBody.meta = error.meta;
+      }
+
+      if (process.env.NODE_ENV === 'development') {
+        responseBody.error = error.message;
+      }
+
+      return res.status(statusCode).json(responseBody);
     }
   }
 

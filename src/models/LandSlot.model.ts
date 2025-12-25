@@ -85,8 +85,9 @@ const LandSlotSchema = new Schema<ILandSlot>(
   }
 );
 
-// Compound index for finding available slots in an area
-LandSlotSchema.index({ areaKey: 1, status: 1 });
+// Compound index for finding available slots in an area (optimized for atomic allotment)
+LandSlotSchema.index({ areaKey: 1, stateKey: 1, status: 1, slotNumber: 1 }); // Fast slot selection
+LandSlotSchema.index({ areaKey: 1, status: 1 }); // Legacy index (kept for compatibility)
 LandSlotSchema.index({ status: 1, lockExpiresAt: 1 }); // For finding expired locks
 LandSlotSchema.index({ ownerId: 1 }); // For finding user's owned slots
 LandSlotSchema.index({ status: 1, ownerId: 1 }); // For finding user's SOLD slots

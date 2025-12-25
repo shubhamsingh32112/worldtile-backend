@@ -134,12 +134,39 @@ app.use(
     res: express.Response,
     _next: express.NextFunction,
   ) => {
-    console.error('Error:', err)
-    res.status(err.status || 500).json({
+    const statusCode = err.statusCode || err.status || 500;
+    
+    // Treat 409 Conflict as a warning (normal occurrence, not an error)
+    if (statusCode === 409) {
+      console.warn(`[409] Slot conflict: ${err.message}`);
+      const responseBody: any = {
+        success: false,
+        message: err.message || 'Conflict occurred',
+      };
+      
+      if (err.meta) {
+        responseBody.meta = err.meta;
+      }
+      
+      return res.status(409).json(responseBody);
+    }
+    
+    // Log other errors normally
+    console.error('Error:', err);
+    const responseBody: any = {
       success: false,
       message: err.message || 'Internal server error',
-      ...(process.env.NODE_ENV === 'development' && { stack: err.stack }),
-    })
+    };
+    
+    if (err.meta) {
+      responseBody.meta = err.meta;
+    }
+    
+    if (process.env.NODE_ENV === 'development') {
+      responseBody.stack = err.stack;
+    }
+    
+    return res.status(statusCode).json(responseBody);
   },
 )
 

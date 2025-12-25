@@ -1,5 +1,6 @@
 import LandSlot from '../models/LandSlot.model';
 import mongoose from 'mongoose';
+import { AppError } from '../utils/AppError';
 
 /**
  * Land Slot Service
@@ -112,6 +113,123 @@ export class LandSlotService {
         lockExpiresAt: null,
       }
     );
+  }
+
+  /**
+   * Allot and lock slots atomically
+   * Guarantees every user gets unique slots if available
+   * Uses MongoDB transaction to prevent race conditions
+   * @param stateKey - State key
+   * @param areaKey - Area key
+   * @param quantity - Number of slots to allot
+   * @param userId - User ID requesting the slots
+   * @param lockExpiresAt - Optional lock expiry time (if not provided, uses default 15 minutes)
+   * @returns Assigned slot IDs and lock expiry time
+   * @throws Error if not enough slots available
+   */
+  static async allotSlotsForOrder(
+    stateKey: string,
+    areaKey: string,
+    quantity: number,
+    userId: string,
+    lockExpiresAt?: Date
+  ): Promise<{
+    assignedSlots: string[];
+    lockExpiresAt: Date;
+  }> {
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+      const normalizedState = stateKey.toLowerCase().trim();
+      const normalizedArea = areaKey.toLowerCase().trim();
+
+      // Calculate lock expiry time
+      const finalLockExpiresAt = lockExpiresAt || (() => {
+        const defaultExpiry = new Date();
+        defaultExpiry.setMinutes(defaultExpiry.getMinutes() + this.LOCK_DURATION_MINUTES);
+        return defaultExpiry;
+      })();
+
+      // 1️⃣ Fetch available slots (AVAILABLE or expired LOCKED)
+      const availableSlots = await LandSlot.find(
+        {
+          stateKey: normalizedState,
+          areaKey: normalizedArea,
+          $or: [
+            { status: 'AVAILABLE' },
+            {
+              status: 'LOCKED',
+              lockExpiresAt: { $lt: new Date() }, // Lock expired
+            },
+          ],
+        },
+        null,
+        { session }
+      )
+        .sort({ slotNumber: 1 }) // Pick the earliest ones
+        .limit(quantity);
+
+      if (availableSlots.length < quantity) {
+        throw new AppError(
+          409,
+          'Not enough slots available',
+          {
+            available: availableSlots.length,
+            requested: quantity,
+          }
+        );
+      }
+
+      const slotIds = availableSlots.map((s) => s.landSlotId);
+
+      // 2️⃣ Lock them in one atomic update
+      const updateResult = await LandSlot.updateMany(
+        {
+          landSlotId: { $in: slotIds },
+          // Double-check they're still available (prevent race condition)
+          $or: [
+            { status: 'AVAILABLE' },
+            {
+              status: 'LOCKED',
+              lockExpiresAt: { $lt: new Date() },
+            },
+          ],
+        },
+        {
+          $set: {
+            status: 'LOCKED',
+            lockedBy: new mongoose.Types.ObjectId(userId),
+            lockExpiresAt: finalLockExpiresAt,
+          },
+        },
+        { session }
+      );
+
+      // Verify we actually locked the expected number
+      if (updateResult.modifiedCount < quantity) {
+        throw new AppError(
+          409,
+          'Not enough slots available',
+          {
+            available: updateResult.modifiedCount,
+            requested: quantity,
+          }
+        );
+      }
+
+      await session.commitTransaction();
+      session.endSession();
+
+      return {
+        assignedSlots: slotIds,
+        lockExpiresAt: finalLockExpiresAt,
+      };
+    } catch (err: any) {
+      await session.abortTransaction();
+      session.endSession();
+      throw err;
+    }
   }
 }
 
