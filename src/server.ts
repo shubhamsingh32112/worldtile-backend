@@ -13,6 +13,7 @@ import userRoutes from './routes/user.routes'
 import referralsRoutes from './routes/referrals.routes'
 import deedsRoutes from './routes/deeds.routes'
 import subscriptionsRoutes from './routes/subscriptions.routes'
+import adminRoutes from './routes/admin.routes'
 
 // Load environment variables
 dotenv.config()
@@ -111,6 +112,7 @@ app.use('/api/users', userRoutes) // Also mount at /api/users for /me and /add-r
 app.use('/api/referrals', referralsRoutes)
 app.use('/api/deeds', deedsRoutes)
 app.use('/api/subscriptions', subscriptionsRoutes)
+app.use('/api/admin', adminRoutes)
 
 // 404 handler
 app.use((_req, res) => {
@@ -121,7 +123,7 @@ app.use((_req, res) => {
 })
 
 const PORT = process.env.PORT || 3000
-  
+
 app.listen(PORT, () => {
   console.log(`🚀 Server running on http://localhost:${PORT}`)
 })

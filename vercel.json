@@ -11,6 +11,8 @@
       "src": "/(.*)",
       "dest": "src/server.ts"
     }
-  ]
+  ],
+  "git": {
+    "deploymentEnabled": false
+  }
 }
-
