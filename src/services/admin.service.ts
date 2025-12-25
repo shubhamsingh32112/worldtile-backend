@@ -57,9 +57,10 @@ export class AdminService {
 
       const totalRevenue = totalRevenueResult[0]?.totalRevenue || 0;
 
-      // Total commissions paid out
+      // Total commissions earned (includes both EARNED and PAID status)
+      // Commissions are earned when an order is paid, so they should be deducted from net revenue
       const totalCommissionsResult = await ReferralEarning.aggregate([
-        { $match: { status: 'PAID' } },
+        { $match: { status: { $in: ['EARNED', 'PAID'] } } },
         {
           $group: {
             _id: null,
@@ -72,7 +73,7 @@ export class AdminService {
 
       const totalCommissions = totalCommissionsResult[0]?.totalCommissions || 0;
 
-      // Net revenue (total sales - commissions)
+      // Net revenue (total sales - commissions earned)
       const netRevenue = totalRevenue - totalCommissions;
 
       // Pending withdrawals
@@ -840,11 +841,12 @@ export class AdminService {
       const totalRevenue = revenueResult[0]?.totalRevenue || 0;
       const orderCount = revenueResult[0]?.count || 0;
 
-      // Total commissions paid
+      // Total commissions earned (includes both EARNED and PAID status)
+      // Commissions are earned when an order is paid, so they should be deducted from net revenue
       const commissionsResult = await ReferralEarning.aggregate([
         {
           $match: {
-            status: 'PAID',
+            status: { $in: ['EARNED', 'PAID'] },
             ...dateFilter,
           },
         },
@@ -862,7 +864,7 @@ export class AdminService {
       const totalCommissions = commissionsResult[0]?.totalCommissions || 0;
       const commissionCount = commissionsResult[0]?.count || 0;
 
-      // Net revenue
+      // Net revenue (total sales - commissions earned)
       const netRevenue = totalRevenue - totalCommissions;
 
       // Get all orders for detailed breakdown
