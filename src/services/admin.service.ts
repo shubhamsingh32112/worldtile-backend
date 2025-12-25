@@ -129,6 +129,7 @@ export class AdminService {
 
   /**
    * Get paginated list of payments with filters
+   * Includes both verified payments (PaymentTransaction) and pending orders (Order without PaymentTransaction)
    */
   static async getPayments(query: any) {
     try {
@@ -136,8 +137,9 @@ export class AdminService {
       const limit = parseInt(query.limit) || 20;
       const skip = (page - 1) * limit;
 
-      // Build filter
-      const filter: any = {};
+      // Build filter for orders
+      const orderFilter: any = {};
+      const paymentTxFilter: any = {};
 
       // Search by user email, name, or txHash
       if (query.search) {
@@ -150,102 +152,177 @@ export class AdminService {
 
         const userIds = users.map((u) => u._id);
 
-        filter.$or = [
+        orderFilter.userId = { $in: userIds };
+        paymentTxFilter.$or = [
           { userId: { $in: userIds } },
           { txHash: { $regex: query.search, $options: 'i' } },
         ];
       }
 
-      // Get payment transactions with populated order and user
-      let payments = await PaymentTransaction.find(filter)
-        .populate('orderId', 'status payment userId state place')
+      // Get verified payment transactions
+      const paymentTransactions = await PaymentTransaction.find(paymentTxFilter)
+        .populate('orderId', 'status payment userId state place createdAt')
         .populate('userId', 'name email')
         .sort({ createdAt: -1 })
-        .skip(skip)
-        .limit(limit)
         .lean();
 
-      // Apply status filter after fetching (since status is derived from order)
-      if (query.status) {
-        const statusFilter = query.status.toUpperCase();
-        payments = payments.filter((payment: any) => {
-          const order = payment.orderId;
-          let paymentStatus = 'PENDING';
-          if (order?.status === 'PAID') {
-            paymentStatus = payment.confirmations >= 19 ? 'COMPLETED' : 'PENDING';
-          } else if (order?.status === 'FAILED' || order?.status === 'EXPIRED') {
-            paymentStatus = 'FAILED';
-          }
-          return paymentStatus === statusFilter;
-        });
-      }
+      // Get pending orders that don't have PaymentTransaction records yet
+      const pendingOrders = await Order.find({
+        status: 'PENDING',
+        ...orderFilter,
+      })
+        .populate('userId', 'name email')
+        .sort({ createdAt: -1 })
+        .lean();
 
-      // Format response
-      const formattedPayments = payments.map((payment: any) => {
-        const order = payment.orderId;
-        const user = payment.userId;
+      // Get order IDs that already have PaymentTransaction records
+      const ordersWithPayments = new Set(
+        paymentTransactions.map((pt: any) => pt.orderId?._id?.toString()).filter(Boolean)
+      );
 
-        // Determine payment status
+      // Filter out pending orders that already have payment transactions
+      const uniquePendingOrders = pendingOrders.filter(
+        (order: any) => !ordersWithPayments.has(order._id.toString())
+      );
+
+      // Get PAID orders that *don't* have PaymentTransaction documents
+      // This handles cases where orders are marked PAID but PaymentTransaction wasn't created
+      const paidOrdersWithoutTx = await Order.find({
+        status: 'PAID',
+        ...orderFilter,
+        _id: { $nin: Array.from(ordersWithPayments).map((id) => new mongoose.Types.ObjectId(id)) },
+      })
+        .populate('userId', 'name email')
+        .sort({ createdAt: -1 })
+        .lean();
+
+      // Combine and format all payments
+      let allPayments: any[] = [];
+
+      // Add verified payment transactions
+      paymentTransactions.forEach((pt: any) => {
+        const order = pt.orderId;
+        const user = pt.userId;
+
         let paymentStatus = 'PENDING';
         if (order?.status === 'PAID') {
-          if (payment.confirmations >= 19) {
-            paymentStatus = 'COMPLETED';
-          } else {
-            paymentStatus = 'PENDING';
-          }
-        } else if (order?.status === 'FAILED') {
-          paymentStatus = 'FAILED';
-        } else if (order?.status === 'EXPIRED') {
+          paymentStatus = pt.confirmations >= 19 ? 'COMPLETED' : 'PENDING';
+        } else if (order?.status === 'FAILED' || order?.status === 'EXPIRED') {
           paymentStatus = 'FAILED';
         }
 
-        return {
-          id: payment._id.toString(),
-          txHash: payment.txHash,
+        allPayments.push({
+          id: pt._id.toString(),
+          txHash: pt.txHash,
           user: {
             id: user?._id?.toString(),
             name: user?.name,
             email: user?.email,
           },
           orderId: order?._id?.toString(),
-          amount: payment.amountUSDT,
-          confirmations: payment.confirmations,
+          amount: pt.amountUSDT,
+          confirmations: pt.confirmations,
           status: paymentStatus,
           orderStatus: order?.status,
-          fromAddress: payment.fromAddress,
-          toAddress: payment.toAddress,
-          blockTimestamp: payment.blockTimestamp,
-          createdAt: payment.createdAt,
-        };
+          fromAddress: pt.fromAddress,
+          toAddress: pt.toAddress,
+          blockTimestamp: pt.blockTimestamp,
+          createdAt: pt.createdAt,
+          isVerified: true, // Has PaymentTransaction record
+        });
       });
 
-      // Count total - for status filter, we approximate by fetching all matching records
-      // This is not ideal for large datasets, but status is derived from order, not stored
-      let total: number;
-      if (query.status) {
-        // Fetch all matching payments to count (without pagination)
-        const allPayments = await PaymentTransaction.find(filter)
-          .populate('orderId', 'status payment')
-          .lean();
-        
-        const statusFilter = query.status.toUpperCase();
-        const filtered = allPayments.filter((payment: any) => {
-          const order = payment.orderId;
-          let paymentStatus = 'PENDING';
-          if (order?.status === 'PAID') {
-            paymentStatus = payment.confirmations >= 19 ? 'COMPLETED' : 'PENDING';
-          } else if (order?.status === 'FAILED' || order?.status === 'EXPIRED') {
-            paymentStatus = 'FAILED';
-          }
-          return paymentStatus === statusFilter;
+      // Add pending orders without payment transactions
+      uniquePendingOrders.forEach((order: any) => {
+        const user = order.userId;
+
+        allPayments.push({
+          id: `pending-${order._id.toString()}`,
+          txHash: order.payment?.txHash || null,
+          user: {
+            id: user?._id?.toString(),
+            name: user?.name,
+            email: user?.email,
+          },
+          orderId: order._id.toString(),
+          amount: order.payment?.expectedAmountUSDT || '0',
+          confirmations: order.payment?.confirmations || 0,
+          status: 'PENDING',
+          orderStatus: order.status,
+          fromAddress: null,
+          toAddress: order.usdtAddress,
+          blockTimestamp: null,
+          createdAt: order.createdAt,
+          isVerified: false, // No PaymentTransaction record yet
         });
-        total = filtered.length;
-      } else {
-        total = await PaymentTransaction.countDocuments(filter);
+      });
+
+      // Add PAID orders without PaymentTransaction records
+      paidOrdersWithoutTx.forEach((order: any) => {
+        const user = order.userId;
+
+        // Determine payment status based on confirmations
+        let paymentStatus = 'COMPLETED';
+        const confirmations = order.payment?.confirmations || 0;
+        if (confirmations < 19) {
+          paymentStatus = 'PENDING'; // PAID but not fully confirmed
+        }
+
+        allPayments.push({
+          id: `order-${order._id.toString()}`,
+          txHash: order.payment?.txHash || null,
+          user: {
+            id: user?._id?.toString(),
+            name: user?.name,
+            email: user?.email,
+          },
+          orderId: order._id.toString(),
+          amount: order.payment?.paidAmountUSDT || order.payment?.expectedAmountUSDT || '0',
+          confirmations: confirmations,
+          status: paymentStatus,
+          orderStatus: order.status,
+          fromAddress: null,
+          toAddress: order.usdtAddress,
+          blockTimestamp: order.payment?.paidAt ? new Date(order.payment.paidAt) : null,
+          createdAt: order.createdAt,
+          isVerified: false, // Missing PaymentTransaction record
+        });
+      });
+
+      // Sort by creation date (newest first)
+      allPayments.sort((a, b) => {
+        const dateA = new Date(a.createdAt).getTime();
+        const dateB = new Date(b.createdAt).getTime();
+        return dateB - dateA;
+      });
+
+      // Apply status filter with mapping for common aliases
+      if (query.status) {
+        const statusFilter = query.status.toUpperCase();
+
+        // Map common status aliases to actual payment statuses
+        const statusMap: any = {
+          PAID: 'COMPLETED', // Map PAID to COMPLETED
+          COMPLETE: 'COMPLETED',
+          SUCCESS: 'COMPLETED',
+        };
+
+        const mappedStatus = statusMap[statusFilter] || statusFilter;
+
+        allPayments = allPayments.filter((payment: any) => {
+          return payment.status === mappedStatus;
+        });
       }
 
+      // Apply pagination
+      const total = allPayments.length;
+      const paginatedPayments = allPayments.slice(skip, skip + limit);
+      console.log("FOUND transactions:", paymentTransactions.length);
+      console.log("FOUND pending orders:", uniquePendingOrders.length);
+      console.log("FOUND paid without tx:", paidOrdersWithoutTx.length);
+      
       return {
-        payments: formattedPayments,
+        payments: paginatedPayments,
         pagination: {
           page,
           limit,
@@ -260,11 +337,57 @@ export class AdminService {
   }
 
   /**
-   * Re-verify a payment transaction
+   * Re-verify a payment transaction or pending order
    */
   static async verifyPayment(paymentId: string, adminId?: string, ipAddress?: string, userAgent?: string) {
     try {
-      const payment = await PaymentTransaction.findById(paymentId).populate(
+      let order: any = null;
+      let payment: any = null;
+
+      // Check if it's a pending order ID (starts with "pending-")
+      if (paymentId.startsWith('pending-')) {
+        const orderId = paymentId.replace('pending-', '');
+        order = await Order.findById(orderId).populate('userId', 'name email');
+        
+        if (!order) {
+          throw new Error('Order not found');
+        }
+
+        // For pending orders, try to verify and finalize
+        const result = await PaymentVerificationService.verifyAndFinalizeOrder(orderId);
+
+        // Log admin action
+        if (adminId) {
+          await this.logAdminAction(
+            adminId,
+            'order',
+            orderId,
+            'verify_pending_order',
+            {
+              orderId: orderId,
+              status: result.status,
+              confirmations: result.confirmations,
+            },
+            ipAddress,
+            userAgent
+          );
+        }
+
+        return {
+          success: result.success,
+          status: result.status,
+          message: result.message,
+          confirmations: result.confirmations,
+          order: {
+            id: order._id.toString(),
+            status: order.status,
+            amount: order.payment?.expectedAmountUSDT,
+          },
+        };
+      }
+
+      // Otherwise, it's a PaymentTransaction ID
+      payment = await PaymentTransaction.findById(paymentId).populate(
         'orderId'
       );
 
@@ -272,7 +395,7 @@ export class AdminService {
         throw new Error('Payment transaction not found');
       }
 
-      const order = payment.orderId as any;
+      order = payment.orderId as any;
 
       if (!order) {
         throw new Error('Order not found');
