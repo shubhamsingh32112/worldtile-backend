@@ -19,12 +19,16 @@ router.post('/payments/:id/verify', AdminController.reVerifyPayment);
 router.get('/withdrawals', AdminController.getWithdrawals);
 router.post('/withdrawals/:id/approve', AdminController.approveWithdrawal);
 router.post('/withdrawals/:id/reject', AdminController.rejectWithdrawal);
+router.post('/withdrawals/:id/mark-paid', AdminController.markWithdrawalAsPaid);
 
 // Business earnings
 router.get('/earnings/business', AdminController.getBusinessEarnings);
 
 // Agents management
 router.get('/users/agents', AdminController.getAgents);
+
+// Health check
+router.get('/health', AdminController.getHealth);
 
 export default router;
 

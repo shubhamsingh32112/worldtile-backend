@@ -50,7 +50,11 @@ export class AdminController {
   static async reVerifyPayment(req: AuthRequest, res: Response): Promise<Response> {
     try {
       const { id } = req.params;
-      const result = await AdminService.verifyPayment(id);
+      const adminId = req.user!.id;
+      const ipAddress = req.ip || req.socket.remoteAddress || undefined;
+      const userAgent = req.headers['user-agent'] || undefined;
+      
+      const result = await AdminService.verifyPayment(id, adminId, ipAddress, userAgent);
       return res.status(200).json({
         success: true,
         message: 'Re-verification triggered',
@@ -58,7 +62,8 @@ export class AdminController {
       });
     } catch (error: any) {
       console.error('Re-verify payment error:', error);
-      return res.status(500).json({
+      const statusCode = error.message?.includes('FRAUD') ? 400 : 500;
+      return res.status(statusCode).json({
         success: false,
         message: error.message || 'Failed to verify payment',
       });
@@ -134,6 +139,47 @@ export class AdminController {
   }
 
   /**
+   * POST /api/admin/withdrawals/:id/mark-paid
+   * Mark withdrawal as paid (COMPLETED) with transaction hash
+   */
+  static async markWithdrawalAsPaid(req: AuthRequest, res: Response): Promise<Response> {
+    try {
+      const { id } = req.params;
+      const { payoutTxHash, notes } = req.body;
+      const adminId = req.user!.id;
+      const ipAddress = req.ip || req.socket.remoteAddress || undefined;
+      const userAgent = req.headers['user-agent'] || undefined;
+
+      if (!payoutTxHash) {
+        return res.status(400).json({
+          success: false,
+          message: 'Payout transaction hash is required',
+        });
+      }
+
+      await AdminService.markWithdrawalAsPaid(
+        id,
+        adminId,
+        payoutTxHash,
+        notes,
+        ipAddress,
+        userAgent
+      );
+      return res.status(200).json({
+        success: true,
+        message: 'Withdrawal marked as paid',
+      });
+    } catch (error: any) {
+      console.error('Mark withdrawal as paid error:', error);
+      const statusCode = error.message?.includes('FRAUD') ? 400 : 400;
+      return res.status(statusCode).json({
+        success: false,
+        message: error.message || 'Failed to mark withdrawal as paid',
+      });
+    }
+  }
+
+  /**
    * GET /api/admin/earnings/business
    * Get business earnings (platform revenue stats)
    */
@@ -169,6 +215,26 @@ export class AdminController {
       return res.status(500).json({
         success: false,
         message: error.message || 'Failed to fetch agents',
+      });
+    }
+  }
+
+  /**
+   * GET /api/admin/health
+   * Admin health check endpoint
+   */
+  static async getHealth(req: AuthRequest, res: Response): Promise<Response> {
+    try {
+      const health = await AdminService.getHealth();
+      return res.status(200).json({
+        success: true,
+        data: health,
+      });
+    } catch (error: any) {
+      console.error('Health check error:', error);
+      return res.status(500).json({
+        success: false,
+        message: error.message || 'Health check failed',
       });
     }
   }

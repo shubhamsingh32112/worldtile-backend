@@ -4,9 +4,39 @@ import Order from '../models/Order.model';
 import ReferralEarning from '../models/ReferralEarning.model';
 import User from '../models/User.model';
 import WithdrawalRequest from '../models/WithdrawalRequest.model';
+import AdminLog from '../models/AdminLog.model';
 import { PaymentVerificationService } from './paymentVerification.service';
 
 export class AdminService {
+  /**
+   * Log admin action for audit trail
+   */
+  private static async logAdminAction(
+    adminId: string,
+    entityType: 'withdrawal' | 'payment' | 'agent' | 'order' | 'user' | 'system',
+    entityId: string,
+    action: string,
+    meta?: Record<string, any>,
+    ipAddress?: string,
+    userAgent?: string
+  ) {
+    try {
+      await AdminLog.create({
+        adminId: new mongoose.Types.ObjectId(adminId),
+        entityType,
+        entityId,
+        action,
+        timestamp: new Date(),
+        meta: meta || {},
+        ipAddress,
+        userAgent,
+      });
+    } catch (error: any) {
+      // Don't throw - logging failures shouldn't break the main operation
+      console.error('Failed to log admin action:', error);
+    }
+  }
+
   /**
    * Get overview statistics for admin dashboard
    */
@@ -232,7 +262,7 @@ export class AdminService {
   /**
    * Re-verify a payment transaction
    */
-  static async verifyPayment(paymentId: string) {
+  static async verifyPayment(paymentId: string, adminId?: string, ipAddress?: string, userAgent?: string) {
     try {
       const payment = await PaymentTransaction.findById(paymentId).populate(
         'orderId'
@@ -248,10 +278,60 @@ export class AdminService {
         throw new Error('Order not found');
       }
 
+      // Fraud Safety: Check for duplicate TX hash
+      if (payment.txHash) {
+        const duplicateCount = await PaymentTransaction.countDocuments({
+          txHash: payment.txHash,
+          _id: { $ne: payment._id },
+        });
+
+        if (duplicateCount > 0) {
+          const errorMsg = `⚠️ FRAUD ALERT: Duplicate transaction hash detected! TX: ${payment.txHash}. This transaction hash exists in ${duplicateCount} other payment(s). Investigate immediately.`;
+          console.error(errorMsg);
+          
+          // Log the fraud attempt
+          if (adminId) {
+            await this.logAdminAction(
+              adminId,
+              'payment',
+              paymentId,
+              'fraud_duplicate_tx_detected',
+              {
+                txHash: payment.txHash,
+                duplicateCount,
+                orderId: order._id.toString(),
+              },
+              ipAddress,
+              userAgent
+            );
+          }
+          
+          throw new Error(errorMsg);
+        }
+      }
+
       // Re-run verification
       const result = await PaymentVerificationService.verifyAndFinalizeOrder(
         order._id.toString()
       );
+
+      // Log admin action
+      if (adminId) {
+        await this.logAdminAction(
+          adminId,
+          'payment',
+          paymentId,
+          'verify_payment',
+          {
+            orderId: order._id.toString(),
+            txHash: payment.txHash,
+            confirmations: result.confirmations,
+            status: result.status,
+          },
+          ipAddress,
+          userAgent
+        );
+      }
 
       // Refresh payment data
       const updatedPayment = await PaymentTransaction.findById(paymentId)
@@ -439,10 +519,107 @@ export class AdminService {
         await agent.save();
       }
 
+      // Log admin action
+      await this.logAdminAction(
+        adminId,
+        'withdrawal',
+        withdrawalId,
+        'approve_withdrawal',
+        {
+          amount: withdrawal.amountUSDT,
+          notes: notes || '',
+          agentId: withdrawal.agentId.toString(),
+        }
+      );
+
       return withdrawal;
     } catch (error: any) {
       console.error('Error approving withdrawal:', error);
       throw new Error(error.message || 'Failed to approve withdrawal');
+    }
+  }
+
+  /**
+   * Mark withdrawal as paid (COMPLETED) with transaction hash
+   */
+  static async markWithdrawalAsPaid(
+    withdrawalId: string,
+    adminId: string,
+    payoutTxHash: string,
+    notes?: string,
+    ipAddress?: string,
+    userAgent?: string
+  ) {
+    try {
+      const withdrawal = await WithdrawalRequest.findById(withdrawalId);
+
+      if (!withdrawal) {
+        throw new Error('Withdrawal request not found');
+      }
+
+      if (withdrawal.status !== 'APPROVED') {
+        throw new Error(
+          `Cannot mark as paid. Withdrawal must be APPROVED first. Current status: ${withdrawal.status}`
+        );
+      }
+
+      // Validate TX hash format (basic check)
+      if (!payoutTxHash || payoutTxHash.trim().length < 10) {
+        throw new Error('Invalid transaction hash');
+      }
+
+      // Check for duplicate payout TX hash
+      const duplicate = await WithdrawalRequest.findOne({
+        payoutTxHash: payoutTxHash.trim(),
+        _id: { $ne: withdrawal._id },
+      });
+
+      if (duplicate) {
+        const errorMsg = `⚠️ FRAUD ALERT: Duplicate payout transaction hash! TX: ${payoutTxHash}. This hash is already used in withdrawal ${duplicate._id}. Investigate immediately.`;
+        console.error(errorMsg);
+        
+        await this.logAdminAction(
+          adminId,
+          'withdrawal',
+          withdrawalId,
+          'fraud_duplicate_payout_tx_detected',
+          {
+            payoutTxHash: payoutTxHash.trim(),
+            duplicateWithdrawalId: duplicate._id.toString(),
+          },
+          ipAddress,
+          userAgent
+        );
+        
+        throw new Error(errorMsg);
+      }
+
+      withdrawal.status = 'COMPLETED';
+      withdrawal.payoutTxHash = payoutTxHash.trim();
+      if (notes) {
+        withdrawal.adminNotes = (withdrawal.adminNotes || '') + '\n' + notes;
+      }
+      await withdrawal.save();
+
+      // Log admin action
+      await this.logAdminAction(
+        adminId,
+        'withdrawal',
+        withdrawalId,
+        'mark_withdrawal_paid',
+        {
+          amount: withdrawal.amountUSDT,
+          payoutTxHash: payoutTxHash.trim(),
+          agentId: withdrawal.agentId.toString(),
+        },
+        ipAddress,
+        userAgent
+      );
+
+      return withdrawal;
+    } catch (error: any) {
+      console.error('Error marking withdrawal as paid:', error);
+      throw new Error(error.message || 'Failed to mark withdrawal as paid');
     }
   }
 
@@ -474,6 +651,19 @@ export class AdminService {
         withdrawal.adminNotes = notes;
       }
       await withdrawal.save();
+
+      // Log admin action
+      await this.logAdminAction(
+        adminId,
+        'withdrawal',
+        withdrawalId,
+        'reject_withdrawal',
+        {
+          amount: withdrawal.amountUSDT,
+          notes: notes || '',
+          agentId: withdrawal.agentId.toString(),
+        }
+      );
 
       return withdrawal;
     } catch (error: any) {
@@ -696,6 +886,85 @@ export class AdminService {
     } catch (error: any) {
       console.error('Error getting agents:', error);
       throw new Error('Failed to fetch agents');
+    }
+  }
+
+  /**
+   * Get admin health check data
+   */
+  static async getHealth() {
+    try {
+      const startTime = Date.now();
+
+      // Check MongoDB connection
+      const mongoStatus = mongoose.connection.readyState;
+      const mongoConnected = mongoStatus === 1; // 1 = connected
+
+      // Check TronGrid API latency
+      let tronApiLatency: number | null = null;
+      let tronApiStatus = 'unknown';
+      try {
+        const tronStart = Date.now();
+        const response = await fetch('https://api.trongrid.io/v1/blocks/latest', {
+          method: 'GET',
+          headers: { 'TRON-PRO-API-KEY': process.env.TRONGRID_API_KEY || '' },
+          signal: AbortSignal.timeout(5000), // 5 second timeout
+        });
+        tronApiLatency = Date.now() - tronStart;
+        tronApiStatus = response.ok ? 'ok' : 'error';
+      } catch (error: any) {
+        tronApiStatus = 'error';
+        tronApiLatency = null;
+      }
+
+      // Get failed verifications in last 24h
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      
+      const failedVerifications = await AdminLog.countDocuments({
+        action: 'verify_payment',
+        timestamp: { $gte: yesterday },
+        'meta.status': { $ne: 'PAID' },
+      });
+
+      // Get total admin actions in last 24h
+      const totalAdminActions = await AdminLog.countDocuments({
+        timestamp: { $gte: yesterday },
+      });
+
+      // Server uptime
+      const uptime = process.uptime();
+
+      // Memory usage
+      const memoryUsage = process.memoryUsage();
+
+      const totalTime = Date.now() - startTime;
+
+      return {
+        mongo: {
+          connected: mongoConnected,
+          status: mongoStatus === 1 ? 'connected' : mongoStatus === 2 ? 'connecting' : 'disconnected',
+        },
+        tronApi: {
+          status: tronApiStatus,
+          latency: tronApiLatency ? `${tronApiLatency}ms` : 'timeout/error',
+        },
+        metrics: {
+          failedVerifications24h: failedVerifications,
+          totalAdminActions24h: totalAdminActions,
+          serverUptime: `${Math.floor(uptime / 60)} minutes`,
+          memoryUsage: {
+            rss: `${Math.round(memoryUsage.rss / 1024 / 1024)}MB`,
+            heapUsed: `${Math.round(memoryUsage.heapUsed / 1024 / 1024)}MB`,
+            heapTotal: `${Math.round(memoryUsage.heapTotal / 1024 / 1024)}MB`,
+          },
+        },
+        timestamp: new Date().toISOString(),
+        responseTime: `${totalTime}ms`,
+      };
+    } catch (error: any) {
+      console.error('Error getting health check:', error);
+      throw new Error('Failed to get health check');
     }
   }
 }
