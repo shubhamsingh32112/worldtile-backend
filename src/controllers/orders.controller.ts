@@ -47,6 +47,7 @@ export class OrdersController {
         address: result.address,
         network: result.network,
         assignedSlots: result.assignedSlots, // Return assigned slots for reference
+        expiresAt: result.order.expiry?.expiresAt || result.order.expiresAt, // Return expiry timestamp
       });
     } catch (error: any) {
       // Use status code from AppError if available, otherwise determine from message
@@ -140,6 +141,7 @@ export class OrdersController {
           nft: order.nft,
           createdAt: order.createdAt,
           paidAt: order.paidAt,
+          expiresAt: order.expiry?.expiresAt || order.expiresAt, // Return expiry timestamp
         },
       });
     } catch (error: any) {
