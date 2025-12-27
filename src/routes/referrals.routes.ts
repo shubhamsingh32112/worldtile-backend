@@ -1,7 +1,9 @@
 import express from 'express';
 import { authenticate, AuthRequest } from '../middleware/auth.middleware';
+import { requireAgent } from '../middleware/role.middleware';
 import User from '../models/User.model';
 import ReferralEarning from '../models/ReferralEarning.model';
+import WithdrawalRequest from '../models/WithdrawalRequest.model';
 import State from '../models/State.model';
 import Area from '../models/Area.model';
 import mongoose from 'mongoose';
@@ -99,6 +101,123 @@ router.get('/earnings', authenticate, async (req: AuthRequest, res: express.Resp
     });
   }
 });
+
+/**
+ * @route   POST /api/referrals/withdraw
+ * @desc    Request withdrawal of earnings
+ * @access  Private (AGENT only)
+ */
+router.post(
+  '/withdraw',
+  authenticate,
+  requireAgent,
+  async (req: AuthRequest, res: express.Response): Promise<void> => {
+    try {
+      const userId = req.user!.id;
+      const { amount, walletAddress } = req.body;
+
+      // Validate input
+      if (!amount || !walletAddress) {
+        res.status(400).json({
+          success: false,
+          message: 'Amount and wallet address are required',
+        });
+        return;
+      }
+
+      const amountNum = parseFloat(amount);
+      if (isNaN(amountNum) || amountNum <= 0) {
+        res.status(400).json({
+          success: false,
+          message: 'Invalid amount',
+        });
+        return;
+      }
+
+      // Get user
+      const user = await User.findById(userId);
+      if (!user) {
+        res.status(404).json({
+          success: false,
+          message: 'User not found',
+        });
+        return;
+      }
+
+      // Check if user is an agent
+      if (user.role !== 'AGENT' && user.role !== 'ADMIN') {
+        res.status(403).json({
+          success: false,
+          message: 'Only agents can request withdrawals',
+        });
+        return;
+      }
+
+      // Get available earnings (EARNED status)
+      const earnedEarnings = await ReferralEarning.aggregate([
+        {
+          $match: {
+            referrerId: new mongoose.Types.ObjectId(userId),
+            status: 'EARNED',
+          },
+        },
+        {
+          $group: {
+            _id: null,
+            total: { $sum: { $toDouble: '$commissionAmountUSDT' } },
+          },
+        },
+      ]);
+
+      const availableEarnings = earnedEarnings[0]?.total || 0;
+
+      if (amountNum > availableEarnings) {
+        res.status(400).json({
+          success: false,
+          message: `Insufficient earnings. Available: ${availableEarnings.toFixed(6)} USDT`,
+        });
+        return;
+      }
+
+      // Check for existing pending withdrawal
+      const existingPending = await WithdrawalRequest.findOne({
+        agentId: userId,
+        status: 'PENDING',
+      });
+
+      if (existingPending) {
+        res.status(400).json({
+          success: false,
+          message: 'You already have a pending withdrawal request',
+        });
+        return;
+      }
+
+      // Create withdrawal request
+      const withdrawalRequest = new WithdrawalRequest({
+        agentId: userId,
+        amountUSDT: amountNum.toFixed(6),
+        walletAddress: walletAddress.trim(),
+        status: 'PENDING',
+      });
+
+      await withdrawalRequest.save();
+
+      res.status(200).json({
+        success: true,
+        message: 'Withdrawal request submitted successfully',
+        transactionId: withdrawalRequest._id.toString(),
+      });
+    } catch (error: any) {
+      console.error('Withdrawal request error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Server error',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+      });
+    }
+  }
+);
 
 export default router;
 

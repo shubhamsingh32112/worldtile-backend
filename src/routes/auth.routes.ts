@@ -123,6 +123,7 @@ router.post(
           id: user._id.toString(),
           name: user.name,
           email: user.email,
+          role: user.role,
         },
       });
     } catch (error: any) {
@@ -195,6 +196,7 @@ router.post(
           id: user._id.toString(),
           name: user.name,
           email: user.email,
+          role: user.role,
         },
       });
     } catch (error: any) {
@@ -327,6 +329,7 @@ router.post(
           photoUrl: user.photoUrl,
           firebaseUid: user.firebaseUid,
           walletAddress: user.walletAddress,
+          role: user.role,
         },
       });
     } catch (error: any) {
@@ -364,6 +367,7 @@ router.get('/me', authenticate, async (req: AuthRequest, res: express.Response):
         photoUrl: user.photoUrl,
         firebaseUid: user.firebaseUid,
         walletAddress: user.walletAddress,
+        role: user.role,
       },
     });
   } catch (error: any) {
