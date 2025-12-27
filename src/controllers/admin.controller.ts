@@ -223,7 +223,7 @@ export class AdminController {
    * GET /api/admin/health
    * Admin health check endpoint
    */
-  static async getHealth(req: AuthRequest, res: Response): Promise<Response> {
+  static async getHealth(_req: AuthRequest, res: Response): Promise<Response> {
     try {
       const health = await AdminService.getHealth();
       return res.status(200).json({
