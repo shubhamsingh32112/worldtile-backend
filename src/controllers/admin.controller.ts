@@ -238,5 +238,49 @@ export class AdminController {
       });
     }
   }
+
+  /**
+   * GET /api/admin/support/tickets
+   * Get support tickets (paginated)
+   */
+  static async getSupportTickets(req: AuthRequest, res: Response): Promise<Response> {
+    try {
+      const data = await AdminService.getSupportTickets(req.query);
+      return res.status(200).json({
+        success: true,
+        data,
+      });
+    } catch (error: any) {
+      console.error('Get support tickets error:', error);
+      return res.status(500).json({
+        success: false,
+        message: error.message || 'Failed to fetch support tickets',
+      });
+    }
+  }
+
+  /**
+   * PATCH /api/admin/support/:id/resolve
+   * Resolve a support ticket
+   */
+  static async resolveSupportTicket(req: AuthRequest, res: Response): Promise<Response> {
+    try {
+      const { id } = req.params;
+      const { response } = req.body;
+      const adminId = req.user!.id;
+
+      await AdminService.resolveSupportTicket(id, adminId, response);
+      return res.status(200).json({
+        success: true,
+        message: 'Support ticket resolved',
+      });
+    } catch (error: any) {
+      console.error('Resolve support ticket error:', error);
+      return res.status(400).json({
+        success: false,
+        message: error.message || 'Failed to resolve support ticket',
+      });
+    }
+  }
 }
 

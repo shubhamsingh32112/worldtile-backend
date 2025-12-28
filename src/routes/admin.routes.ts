@@ -27,6 +27,10 @@ router.get('/earnings/business', AdminController.getBusinessEarnings);
 // Agents management
 router.get('/users/agents', AdminController.getAgents);
 
+// Support tickets management
+router.get('/support/tickets', AdminController.getSupportTickets);
+router.patch('/support/:id/resolve', AdminController.resolveSupportTicket);
+
 // Health check
 router.get('/health', AdminController.getHealth);
 

@@ -187,6 +187,10 @@ router.get('/me', authenticate, async (req: AuthRequest, res: express.Response):
       photoUrl: user.photoUrl || null,
       phoneNumber: user.phoneNumber || null,
       walletAddress: user.walletAddress || null,
+      fullName: user.fullName || null,
+      tronWalletAddress: user.tronWalletAddress || null,
+      savedWithdrawalDetails: user.savedWithdrawalDetails || false,
+      userPendingMessage: user.userPendingMessage || null,
       referralCode: user.referralCode || null,
       referredBy: user.referredBy ? user.referredBy.toString() : null,
       agentProfile: {
@@ -200,6 +204,13 @@ router.get('/me', authenticate, async (req: AuthRequest, res: express.Response):
       },
       createdAt: user.createdAt.toISOString(),
     });
+
+    // Clear pending message after returning it
+    if (user.userPendingMessage) {
+      await User.findByIdAndUpdate(userId, {
+        $unset: { userPendingMessage: '' },
+      });
+    }
   } catch (error: any) {
     console.error('Get user account error:', error);
     res.status(500).json({

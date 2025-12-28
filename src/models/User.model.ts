@@ -20,6 +20,10 @@ export interface IUser extends Document {
   photoUrl?: string;
   phoneNumber?: string;
   walletAddress?: string;
+  fullName?: string; // Full name for withdrawal profile
+  tronWalletAddress?: string; // TRON wallet address for withdrawals
+  savedWithdrawalDetails?: boolean; // Whether user has saved withdrawal details
+  userPendingMessage?: string; // Pending notification message for user
   role: 'USER' | 'AGENT' | 'ADMIN'; // User role (default: USER)
   referralCode?: string; // Auto-generated unique code
   referredBy?: mongoose.Types.ObjectId; // Reference to User who referred this user
@@ -67,6 +71,22 @@ const UserSchema = new Schema<IUser>(
       trim: true,
     },
     walletAddress: {
+      type: String,
+      trim: true,
+    },
+    fullName: {
+      type: String,
+      trim: true,
+    },
+    tronWalletAddress: {
+      type: String,
+      trim: true,
+    },
+    savedWithdrawalDetails: {
+      type: Boolean,
+      default: false,
+    },
+    userPendingMessage: {
       type: String,
       trim: true,
     },

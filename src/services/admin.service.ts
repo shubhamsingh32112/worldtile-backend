@@ -5,6 +5,7 @@ import ReferralEarning from '../models/ReferralEarning.model';
 import User from '../models/User.model';
 import WithdrawalRequest from '../models/WithdrawalRequest.model';
 import AdminLog from '../models/AdminLog.model';
+import SupportTicket from '../models/SupportTicket.model';
 import { PaymentVerificationService } from './paymentVerification.service';
 
 export class AdminService {
@@ -494,7 +495,7 @@ export class AdminService {
 
       // Get withdrawals with populated agent
       const withdrawals = await WithdrawalRequest.find(filter)
-        .populate('agentId', 'name email walletAddress role')
+        .populate('agentId', 'name email phoneNumber fullName tronWalletAddress walletAddress role')
         .populate('approvedBy', 'name email')
         .sort({ createdAt: -1 })
         .skip(skip)
@@ -505,9 +506,10 @@ export class AdminService {
         id: withdrawal._id.toString(),
         agent: {
           id: withdrawal.agentId?._id?.toString(),
-          name: withdrawal.agentId?.name,
+          name: withdrawal.agentId?.fullName || withdrawal.agentId?.name,
           email: withdrawal.agentId?.email,
-          walletAddress: withdrawal.agentId?.walletAddress,
+          phoneNumber: withdrawal.agentId?.phoneNumber,
+          walletAddress: withdrawal.agentId?.tronWalletAddress || withdrawal.agentId?.walletAddress,
         },
         amount: withdrawal.amountUSDT,
         walletAddress: withdrawal.walletAddress,
@@ -529,7 +531,7 @@ export class AdminService {
       const total = await WithdrawalRequest.countDocuments(filter);
 
       return {
-        withdrawals: formattedWithdrawals,
+        data: formattedWithdrawals,
         pagination: {
           page,
           limit,
@@ -724,6 +726,11 @@ export class AdminService {
         withdrawal.adminNotes = (withdrawal.adminNotes || '') + '\n' + notes;
       }
       await withdrawal.save();
+
+      // Notify user that withdrawal has been credited
+      await User.findByIdAndUpdate(withdrawal.agentId, {
+        $set: { userPendingMessage: '💸 Withdrawal payment credited to your wallet!' },
+      });
 
       // Log admin action
       await this.logAdminAction(
@@ -1090,6 +1097,127 @@ export class AdminService {
     } catch (error: any) {
       console.error('Error getting health check:', error);
       throw new Error('Failed to get health check');
+    }
+  }
+
+  /**
+   * Get support tickets (paginated)
+   */
+  static async getSupportTickets(query: any) {
+    try {
+      const page = parseInt(query.page) || 1;
+      const limit = parseInt(query.limit) || 20;
+      const skip = (page - 1) * limit;
+
+      const filter: any = {};
+
+      // Status filter
+      if (query.status) {
+        filter.status = query.status.toUpperCase();
+      }
+
+      // Get tickets with populated user and withdrawal
+      const tickets = await SupportTicket.find(filter)
+        .populate('userId', 'name email')
+        .populate('withdrawalId', 'amountUSDT status')
+        .populate('respondedBy', 'name email')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(limit)
+        .lean();
+
+      const formattedTickets = tickets.map((ticket: any) => ({
+        id: ticket._id.toString(),
+        user: {
+          id: ticket.userId?._id?.toString(),
+          name: ticket.userId?.name,
+          email: ticket.userId?.email,
+        },
+        withdrawalId: ticket.withdrawalId?._id?.toString(),
+        message: ticket.message,
+        status: ticket.status,
+        adminResponse: ticket.adminResponse,
+        respondedBy: ticket.respondedBy
+          ? {
+              id: ticket.respondedBy._id.toString(),
+              name: ticket.respondedBy.name,
+              email: ticket.respondedBy.email,
+            }
+          : null,
+        respondedAt: ticket.respondedAt,
+        createdAt: ticket.createdAt,
+        updatedAt: ticket.updatedAt,
+      }));
+
+      const total = await SupportTicket.countDocuments(filter);
+
+      return {
+        data: formattedTickets,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+        },
+      };
+    } catch (error: any) {
+      console.error('Error getting support tickets:', error);
+      throw new Error('Failed to fetch support tickets');
+    }
+  }
+
+  /**
+   * Resolve a support ticket
+   */
+  static async resolveSupportTicket(
+    ticketId: string,
+    adminId: string,
+    response?: string
+  ) {
+    try {
+      const ticket = await SupportTicket.findById(ticketId);
+
+      if (!ticket) {
+        throw new Error('Support ticket not found');
+      }
+
+      if (ticket.status === 'RESOLVED' || ticket.status === 'CLOSED') {
+        throw new Error(`Ticket is already ${ticket.status.toLowerCase()}`);
+      }
+
+      // Update ticket status
+      ticket.status = 'RESOLVED';
+      ticket.respondedBy = new mongoose.Types.ObjectId(adminId);
+      ticket.respondedAt = new Date();
+      if (response) {
+        ticket.adminResponse = response.trim();
+      }
+
+      await ticket.save();
+
+      // Set user notification flag (store in user model or separate notification)
+      // For simplicity, we'll add a field to User model for pending notifications
+      await User.findByIdAndUpdate(ticket.userId, {
+        $set: { userPendingMessage: '🎉 Your support request has been resolved' },
+      });
+
+      // Log admin action
+      await this.logAdminAction(
+        adminId,
+        'system',
+        ticketId,
+        'resolve_support_ticket',
+        {
+          ticketId: ticketId,
+          userId: ticket.userId.toString(),
+          response: response || '',
+        }
+      );
+
+      return ticket;
+    } catch (error: any) {
+      console.error('Error resolving support ticket:', error);
+      throw new Error(error.message || 'Failed to resolve support ticket');
     }
   }
 }
