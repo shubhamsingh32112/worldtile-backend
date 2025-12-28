@@ -114,7 +114,7 @@ router.post(
   async (req: AuthRequest, res: express.Response): Promise<void> => {
     try {
       const userId = req.user!.id;
-      const { amount, walletAddress } = req.body;
+      const { amount, walletAddress, fullName, email, phoneNumber, saveDetails } = req.body;
 
       // Validate input
       if (!amount || !walletAddress) {
@@ -123,6 +123,40 @@ router.post(
           message: 'Amount and wallet address are required',
         });
         return;
+      }
+
+      // Validate additional fields if provided
+      if (saveDetails) {
+        if (!fullName || !email) {
+          res.status(400).json({
+            success: false,
+            message: 'Full name and email are required when saving details',
+          });
+          return;
+        }
+
+        // Validate email format
+        const emailRegex = /^\S+@\S+\.\S+$/;
+        if (!emailRegex.test(email.trim())) {
+          res.status(400).json({
+            success: false,
+            message: 'Invalid email format',
+          });
+          return;
+        }
+
+        // Validate phone number if provided (10-15 digits)
+        if (phoneNumber && phoneNumber.trim()) {
+          const phoneRegex = /^\d{10,15}$/;
+          const cleanedPhone = phoneNumber.trim().replace(/[\s\-\(\)]/g, ''); // Remove common formatting
+          if (!phoneRegex.test(cleanedPhone)) {
+            res.status(400).json({
+              success: false,
+              message: 'Invalid phone number. Must be 10-15 digits',
+            });
+            return;
+          }
+        }
       }
 
       const amountNum = parseFloat(amount);
@@ -193,6 +227,24 @@ router.post(
         return;
       }
 
+      // Save user details if checkbox is checked
+      if (saveDetails === true) {
+        const updateData: any = {
+          fullName: fullName.trim(),
+          email: email.trim().toLowerCase(),
+          tronWalletAddress: walletAddress.trim(),
+          savedWithdrawalDetails: true,
+        };
+        
+        // Clean and save phone number if provided
+        if (phoneNumber && phoneNumber.trim()) {
+          const cleanedPhone = phoneNumber.trim().replace(/[\s\-\(\)]/g, '');
+          updateData.phoneNumber = cleanedPhone;
+        }
+
+        await User.findByIdAndUpdate(userId, updateData);
+      }
+
       // Create withdrawal request
       const withdrawalRequest = new WithdrawalRequest({
         agentId: userId,
@@ -210,6 +262,49 @@ router.post(
       });
     } catch (error: any) {
       console.error('Withdrawal request error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Server error',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+      });
+    }
+  }
+);
+
+/**
+ * @route   GET /api/referrals/withdrawals/history
+ * @desc    Get withdrawal history for the current agent
+ * @access  Private (AGENT only)
+ */
+router.get(
+  '/withdrawals/history',
+  authenticate,
+  requireAgent,
+  async (req: AuthRequest, res: express.Response): Promise<void> => {
+    try {
+      const userId = req.user!.id;
+
+      const withdrawals = await WithdrawalRequest.find({ agentId: userId })
+        .sort({ createdAt: -1 })
+        .lean();
+
+      const formattedWithdrawals = withdrawals.map((withdrawal: any) => ({
+        id: withdrawal._id.toString(),
+        amount: withdrawal.amountUSDT,
+        walletAddress: withdrawal.walletAddress,
+        status: withdrawal.status,
+        adminNotes: withdrawal.adminNotes,
+        payoutTxHash: withdrawal.payoutTxHash,
+        createdAt: withdrawal.createdAt,
+        updatedAt: withdrawal.updatedAt,
+      }));
+
+      res.status(200).json({
+        success: true,
+        data: formattedWithdrawals,
+      });
+    } catch (error: any) {
+      console.error('Get withdrawal history error:', error);
       res.status(500).json({
         success: false,
         message: 'Server error',

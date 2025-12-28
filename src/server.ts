@@ -14,6 +14,7 @@ import referralsRoutes from './routes/referrals.routes'
 import deedsRoutes from './routes/deeds.routes'
 import subscriptionsRoutes from './routes/subscriptions.routes'
 import adminRoutes from './routes/admin.routes'
+import supportRoutes from './routes/support.routes'
 
 // Load environment variables
 dotenv.config()
@@ -113,6 +114,7 @@ app.use('/api/referrals', referralsRoutes)
 app.use('/api/deeds', deedsRoutes)
 app.use('/api/subscriptions', subscriptionsRoutes)
 app.use('/api/admin', adminRoutes)
+app.use('/api/support', supportRoutes)
 
 // 404 handler
 app.use((_req, res) => {
