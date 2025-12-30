@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>WorldTile Digital Land Deed</title>
+
+  <!-- Google Fonts -->
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@500;600;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <style>
+    body {
+      margin: 0;
+      padding: 40px;
+      background: #f5f5f5;
+      font-family: "Inter", sans-serif;
+      color: #1f2937;
+    }
+
+    .deed {
+      max-width: 900px;
+      margin: auto;
+      background: #ffffff;
+      border: 1px solid #e5e7eb;
+      padding: 10px;
+      position: relative;
+    }
+
+    /* HEADER */
+    .top {
+      text-align: center;
+      margin-bottom: 30px;
+    }
+
+    .brand {
+      font-family: "Playfair Display", serif;
+      font-size: 26px;
+      letter-spacing: 2px;
+      font-weight: 600;
+      color: #334155;
+    }
+
+    .subtitle {
+      font-size: 14px;
+      color: #6b7280;
+      margin-top: 6px;
+    }
+
+    hr {
+      border: none;
+      border-top: 1px solid #e5e7eb;
+      margin: 30px 0;
+    }
+
+    /* TITLE */
+    .title {
+      font-family: "Playfair Display", serif;
+      font-size: 28px;
+      text-align: center;
+      letter-spacing: 2px;
+      margin-bottom: 10px;
+    }
+
+    .issue-date {
+      text-align: right;
+      font-size: 14px;
+      color: #4b5563;
+      margin-bottom: 30px;
+    }
+
+    /* OWNER TEXT */
+    .content {
+      text-align: center;
+      font-size: 15px;
+      line-height: 1.9;
+      margin-bottom: 40px;
+      color: #374151;
+    }
+
+    .owner-name {
+      font-family: "Playfair Display", serif;
+      font-size: 24px;
+      font-weight: 600;
+      margin: 18px 0;
+      color: #1e3a8a;
+    }
+
+    /* DETAILS GRID (MATCHING FIRST TEMPLATE) */
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      border: 1px solid #e5e7eb;
+      border-radius: 6px;
+      overflow: hidden;
+      margin-bottom: 40px;
+    }
+
+    .cell {
+      padding: 16px 18px;
+      border-bottom: 1px solid #e5e7eb;
+      border-right: 1px solid #e5e7eb;
+    }
+
+    .cell:nth-child(2n) {
+      border-right: none;
+    }
+
+    .cell:last-child,
+    .cell:nth-last-child(2) {
+      border-bottom: none;
+    }
+
+    .label {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #6b7280;
+      margin-bottom: 6px;
+    }
+
+    .value {
+      font-size: 15px;
+      font-weight: 500;
+      color: #111827;
+      word-break: break-all;
+    }
+
+    /* FOOTER + SEAL */
+    .footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      margin-top: 50px;
+    }
+
+    .issuer {
+      font-size: 14px;
+      color: #374151;
+      line-height: 1.7;
+    }
+
+    .issuer strong {
+      font-weight: 600;
+    }
+
+    .seal {
+      width: 170px;
+      height: 170px;
+      object-fit: contain;
+    }
+  </style>
+</head>
+
+<body>
+
+  <div class="deed">
+
+    <div class="top">
+      <div class="brand">WORLD TILE</div>
+      <div class="subtitle">Blockchain Secured Digital Property Registry</div>
+    </div>
+
+    <hr>
+
+    <div class="title">DIGITAL LAND OWNERSHIP DEED</div>
+
+    <div class="issue-date">
+      Issued: {{issuedAt}}
+    </div>
+
+    <div class="content">
+      This certifies that
+      <div class="owner-name">{{ownerName}}</div>
+      is the verified digital owner of the following <strong>WorldTile</strong> land parcel,
+      permanently recorded on the blockchain.
+    </div>
+
+
+    <!-- DATA GRID -->
+    <div class="grid">
+
+      <div class="cell"><div class="label">Plot ID</div><div class="value">{{plotId}}</div></div>
+      <div class="cell"><div class="label">City / Region</div><div class="value">{{city}}</div></div>
+      <div class="cell"><div class="label">Latitude</div><div class="value">{{latitude}}</div></div>
+      <div class="cell"><div class="label">Longitude</div><div class="value">{{longitude}}</div></div>
+      <div class="cell"><div class="label">NFT Token ID</div><div class="value">{{tokenId}}</div></div>
+      <div class="cell"><div class="label">Blockchain</div><div class="value">{{blockchain}}</div></div>
+      <div class="cell"><div class="label">Transaction ID</div><div class="value">{{transactionId}}</div></div>
+      <div class="cell"><div class="label">Seal Number</div><div class="value">{{sealNo}}</div></div>
+
+    </div>
+
+
+    <!-- FOOTER & SEAL -->
+    <div class="footer">
+      <div class="issuer">
+        Issued by<br>
+        <strong>WorldTile Registry</strong><br>
+        Digitally validated · No physical signature required
+      </div>
+
+      <img src="data:image/png;base64,{{sealBase64}}" class="seal" alt="Official Seal">
+    </div>
+
+  </div>
+
+</body>
+</html>

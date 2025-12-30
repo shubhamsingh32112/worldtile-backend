@@ -1,4 +1,8 @@
 import axios, { AxiosError } from 'axios';
+import fs from 'fs';
+import path from 'path';
+import { mailer } from '../utils/emailClient';
+import { generateDeedPDF, DeedData } from '../utils/generateDeedPDF';
 
 /**
  * TronGrid API Response Types
@@ -23,6 +27,90 @@ interface TronGridTokenTransfer {
  */
 export class PaymentVerificationService {
   private static readonly TRONGRID_BASE_URL = 'https://api.trongrid.io/v1';
+
+  /**
+   * Send deed email with PDF attachment
+   * This is called AFTER the transaction is committed, so email failures don't rollback DB
+   */
+  private static async sendDeedEmail(user: any, deed: any): Promise<void> {
+    try {
+      // Read and convert seal image to base64
+      let sealBase64 = "";
+      const sealPath = path.join(__dirname, "../../assets/seal.png");
+      if (fs.existsSync(sealPath)) {
+        const sealBuffer = fs.readFileSync(sealPath);
+        sealBase64 = sealBuffer.toString("base64");
+        console.log(`✅ Seal image loaded successfully from: ${sealPath} (${sealBase64.length} bytes base64)`);
+      } else {
+        console.warn(`⚠️  Seal image not found at: ${sealPath}`);
+      }
+
+      // Prepare deed data for PDF generation
+      const deedData: DeedData = {
+        ownerName: deed.ownerName,
+        plotId: deed.plotId,
+        city: deed.city,
+        latitude: deed.latitude,
+        longitude: deed.longitude,
+        tokenId: deed.nft.tokenId,
+        blockchain: deed.nft.blockchain,
+        transactionId: deed.payment.transactionId,
+        issuedAt: deed.issuedAt.toLocaleDateString("en-US", {
+          year: "numeric",
+          month: "long",
+          day: "numeric",
+        }),
+        sealNo: deed.sealNo,
+        sealBase64: sealBase64,
+      };
+
+      // Generate PDF
+      const pdfBuffer = await generateDeedPDF(deedData);
+
+      // Create email transporter
+      const transporter = await mailer();
+
+      // Email content
+      const emailText = `
+Hi ${user.name || 'Valued Customer'},
+
+Congratulations on your land purchase in WorldTile!
+
+Your Digital Land Ownership Deed is attached as PDF. 
+This deed confirms your verified ownership, recorded on blockchain.
+
+Keep this safe. If you ever sell or transfer ownership, this document will be required.
+
+Plot ID: ${deed.plotId}
+City/Region: ${deed.city}
+Issued: ${deedData.issuedAt}
+
+Regards,
+WorldTile Team
+team@worldtile.in
+      `.trim();
+
+      // Send email
+      await transporter.sendMail({
+        from: `"WorldTile" <${process.env.EMAIL_USER}>`,
+        to: user.email,
+        subject: `Your WorldTile Land Ownership Deed - ${deed.plotId}`,
+        text: emailText,
+        attachments: [
+          {
+            filename: `WorldTile-Deed-${deed.plotId}.pdf`,
+            content: pdfBuffer,
+          },
+        ],
+      });
+
+      console.log(`✅ Deed email sent successfully to ${user.email} for deed ${deed.plotId}`);
+    } catch (error: any) {
+      // Log error but don't throw - email failure should not affect the payment flow
+      console.error(`❌ Failed to send deed email to ${user.email} for deed ${deed.plotId}:`, error.message);
+      // Optionally, you could queue this for retry later
+    }
+  }
   
   /**
    * Get required confirmations from environment (default: 19)
@@ -892,6 +980,27 @@ export class PaymentVerificationService {
       await session.commitTransaction();
       session.endSession();
 
+      // Send deed emails AFTER transaction commit (so email failures don't rollback DB)
+      // Fetch all created deeds for this order to send emails
+      try {
+        const createdDeeds = await Deed.find({ orderId: order._id });
+        const userForEmail = await User.findById(order.userId);
+
+        if (userForEmail && createdDeeds.length > 0) {
+          // Send email for each deed (or you could send one email with all deeds)
+          for (const deed of createdDeeds) {
+            // Send email asynchronously (don't await - fire and forget)
+            // This prevents email sending from blocking the API response
+            PaymentVerificationService.sendDeedEmail(userForEmail, deed).catch((error) => {
+              console.error(`Failed to send deed email for ${deed.plotId}:`, error);
+            });
+          }
+        }
+      } catch (emailError: any) {
+        // Log email errors but don't fail the payment verification
+        console.error('Error sending deed emails (non-critical):', emailError.message);
+      }
+
       return {
         success: true,
         status: 'PAID',
@@ -906,6 +1015,48 @@ export class PaymentVerificationService {
       // Re-throw error
       throw new Error(`Failed to finalize order: ${error.message}`);
     }
+  }
+
+  /**
+   * Test method to send deed emails for an existing paid order
+   * This is for testing purposes only - call this after an order is already PAID
+   * @param orderId - Order ID that has been paid and has deeds
+   */
+  static async sendDeedEmailsForOrder(orderId: string): Promise<void> {
+    const Order = (await import('../models/Order.model')).default;
+    const Deed = (await import('../models/Deed.model')).default;
+    const User = (await import('../models/User.model')).default;
+
+    // Find the order
+    const order = await Order.findById(orderId);
+    if (!order) {
+      throw new Error(`Order ${orderId} not found`);
+    }
+
+    if (order.status !== 'PAID') {
+      throw new Error(`Order ${orderId} is not PAID (status: ${order.status}). This method only works for paid orders.`);
+    }
+
+    // Find all deeds for this order
+    const deeds = await Deed.find({ orderId: order._id });
+    if (deeds.length === 0) {
+      throw new Error(`No deeds found for order ${orderId}`);
+    }
+
+    // Get user
+    const user = await User.findById(order.userId);
+    if (!user) {
+      throw new Error(`User ${order.userId} not found`);
+    }
+
+    console.log(`📧 Sending ${deeds.length} deed email(s) for order ${orderId} to ${user.email}`);
+
+    // Send email for each deed
+    for (const deed of deeds) {
+      await PaymentVerificationService.sendDeedEmail(user, deed);
+    }
+
+    console.log(`✅ All deed emails sent successfully for order ${orderId}`);
   }
 }
 
