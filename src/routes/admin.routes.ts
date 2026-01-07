@@ -1,12 +1,12 @@
 import express from 'express';
-import { authenticate } from '../middleware/auth.middleware';
+import { thirdwebAuth } from '../middleware/thirdwebAuth.middleware';
 import { requireAdmin } from '../middleware/role.middleware';
 import { AdminController } from '../controllers/admin.controller';
 
 const router = express.Router();
 
 // All admin routes require authentication and ADMIN role
-router.use(authenticate, requireAdmin);
+router.use(thirdwebAuth, requireAdmin);
 
 // Dashboard stats
 router.get('/stats/overview', AdminController.getOverviewStats);

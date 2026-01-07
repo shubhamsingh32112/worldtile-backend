@@ -509,7 +509,7 @@ export class AdminService {
           name: withdrawal.agentId?.fullName || withdrawal.agentId?.name,
           email: withdrawal.agentId?.email,
           phoneNumber: withdrawal.agentId?.phoneNumber,
-          walletAddress: withdrawal.agentId?.tronWalletAddress || withdrawal.agentId?.walletAddress,
+          walletAddress: withdrawal.agentId?.tronWalletAddress || withdrawal.agentId?.primaryWallet || withdrawal.agentId?.walletAddress,
         },
         amount: withdrawal.amountUSDT,
         walletAddress: withdrawal.walletAddress,
@@ -639,9 +639,14 @@ export class AdminService {
         }
       }
 
-      // Update agent's wallet address if provided
-      if (withdrawal.walletAddress && !agent.walletAddress) {
+      // Update agent's wallet address if provided (backward compatibility)
+      // Note: In new system, wallets are managed via wallets array
+      if (withdrawal.walletAddress && !agent.walletAddress && !agent.primaryWallet) {
         agent.walletAddress = withdrawal.walletAddress;
+        // Also set as primaryWallet if not set
+        if (!agent.primaryWallet) {
+          agent.primaryWallet = withdrawal.walletAddress;
+        }
         await agent.save();
       }
 

@@ -1,6 +1,6 @@
 import express from 'express';
 import { body, validationResult } from 'express-validator';
-import { authenticate, AuthRequest } from '../middleware/auth.middleware';
+import { thirdwebAuth, ThirdwebAuthRequest } from '../middleware/thirdwebAuth.middleware';
 import User from '../models/User.model';
 import UserLand from '../models/UserLand.model';
 import State from '../models/State.model';
@@ -14,9 +14,16 @@ const router = express.Router();
  * @desc    Get user statistics (lands owned count, referral earnings)
  * @access  Private
  */
-router.get('/stats', authenticate, async (req: AuthRequest, res: express.Response) => {
+router.get('/stats', thirdwebAuth, async (req: ThirdwebAuthRequest, res: express.Response) => {
   try {
-    const userId = req.user!.id;
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: 'User not found',
+      });
+      return;
+    }
+    const userId = req.user.id;
 
     // Count user lands
     const landsOwned = await UserLand.countDocuments({
@@ -49,9 +56,16 @@ router.get('/stats', authenticate, async (req: AuthRequest, res: express.Respons
  * @desc    Get all lands owned by the authenticated user
  * @access  Private
  */
-router.get('/lands', authenticate, async (req: AuthRequest, res: express.Response) => {
+router.get('/lands', thirdwebAuth, async (req: ThirdwebAuthRequest, res: express.Response) => {
   try {
-    const userId = req.user!.id;
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: 'User not found',
+      });
+      return;
+    }
+    const userId = req.user.id;
     console.log(`[GET /api/user/lands] Fetching lands for user: ${userId}`);
 
     // Get user lands
@@ -139,13 +153,22 @@ router.get('/lands', authenticate, async (req: AuthRequest, res: express.Respons
 /**
  * @route   GET /api/users/me
  * @desc    Get current user's full account data (with agentProfile and referralStats)
+ * @desc    Creates user if missing (first-time wallet connection)
  * @access  Private
  */
-router.get('/me', authenticate, async (req: AuthRequest, res: express.Response): Promise<void> => {
+router.get('/me', thirdwebAuth, async (req: ThirdwebAuthRequest, res: express.Response): Promise<void> => {
   try {
-    const userId = req.user!.id;
+    // User should already be set by authMiddleware
+    if (!req.user || !req.user.id) {
+      res.status(401).json({
+        success: false,
+        message: 'Authentication required',
+      });
+      return;
+    }
 
-    const user = await User.findById(userId);
+    // Load full user document
+    let user = await User.findById(req.user.id);
 
     if (!user) {
       res.status(404).json({
@@ -153,6 +176,52 @@ router.get('/me', authenticate, async (req: AuthRequest, res: express.Response):
         message: 'User not found',
       });
       return;
+    }
+
+    // Handle referral code from query parameter (for linking referrals to existing accounts)
+    const referralCode = req.query.referralCode as string | undefined;
+    
+    // Only process referral code if user doesn't already have a referrer
+    if (referralCode && !user.referredBy) {
+      const referrer = await User.findOne({ 
+        referralCode: referralCode.trim().toUpperCase() 
+      });
+      
+      if (referrer) {
+        // Hard rule: Cannot refer yourself
+        if (referrer._id.toString() === user._id.toString()) {
+          res.status(400).json({
+            success: false,
+            message: 'Cannot refer yourself',
+          });
+          return;
+        }
+        
+        // Hard rule: Prevent referral loops (A → B → A)
+        if (referrer.referredBy) {
+          const referrerOfReferrer = await User.findById(referrer.referredBy);
+          if (referrerOfReferrer && referrerOfReferrer._id.toString() === user._id.toString()) {
+            res.status(400).json({
+              success: false,
+              message: 'Referral loop detected',
+            });
+            return;
+          }
+        }
+        
+        // Set referral (immutable after save, so only if not already set)
+        user.referredBy = referrer._id;
+        await user.save();
+
+        // Increment referrer's totalReferrals count
+        if (referrer.referralStats) {
+          referrer.referralStats.totalReferrals = (referrer.referralStats.totalReferrals || 0) + 1;
+          await referrer.save();
+        }
+      } else {
+        // Invalid referral code - silently ignore (don't fail request)
+        console.warn(`Invalid referral code provided: ${referralCode}`);
+      }
     }
 
     // Initialize agentProfile if user is AGENT but agentProfile doesn't exist
@@ -183,10 +252,10 @@ router.get('/me', authenticate, async (req: AuthRequest, res: express.Response):
     // Return user account matching UserAccount model structure
     res.status(200).json({
       name: user.name,
-      email: user.email,
+      email: user.email || null,
       photoUrl: user.photoUrl || null,
       phoneNumber: user.phoneNumber || null,
-      walletAddress: user.walletAddress || null,
+      walletAddress: user.primaryWallet || user.walletAddress || null,
       fullName: user.fullName || null,
       tronWalletAddress: user.tronWalletAddress || null,
       savedWithdrawalDetails: user.savedWithdrawalDetails || false,
@@ -207,7 +276,7 @@ router.get('/me', authenticate, async (req: AuthRequest, res: express.Response):
 
     // Clear pending message after returning it
     if (user.userPendingMessage) {
-      await User.findByIdAndUpdate(userId, {
+      await User.findByIdAndUpdate(user._id, {
         $unset: { userPendingMessage: '' },
       });
     }
@@ -228,7 +297,7 @@ router.get('/me', authenticate, async (req: AuthRequest, res: express.Response):
  */
 router.post(
   '/add-referral',
-  authenticate,
+  thirdwebAuth,
   [
     body('referralCode')
       .trim()
@@ -237,7 +306,7 @@ router.post(
       .isLength({ min: 4, max: 20 })
       .withMessage('Referral code must be between 4 and 20 characters'),
   ],
-  async (req: AuthRequest, res: express.Response): Promise<void> => {
+  async (req: ThirdwebAuthRequest, res: express.Response): Promise<void> => {
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
@@ -249,7 +318,15 @@ router.post(
         return;
       }
 
-      const userId = req.user!.id;
+      if (!req.user) {
+        res.status(401).json({
+          success: false,
+          message: 'User not found',
+        });
+        return;
+      }
+
+      const userId = req.user.id;
       const { referralCode } = req.body;
       const normalizedCode = referralCode.trim().toUpperCase();
 
@@ -497,7 +574,7 @@ router.post(
  */
 router.put(
   '/me',
-  authenticate,
+  thirdwebAuth,
   [
     body('name')
       .optional()
@@ -514,21 +591,29 @@ router.put(
       .trim()
       .isURL()
       .withMessage('Photo URL must be a valid URL'),
-  ],
-  async (req: AuthRequest, res: express.Response): Promise<void> => {
-    try {
-      const errors = validationResult(req);
-      if (!errors.isEmpty()) {
-        res.status(400).json({
-          success: false,
-          message: 'Validation failed',
-          errors: errors.array(),
-        });
-        return;
-      }
+    ],
+    async (req: ThirdwebAuthRequest, res: express.Response): Promise<void> => {
+      try {
+        const errors = validationResult(req);
+        if (!errors.isEmpty()) {
+          res.status(400).json({
+            success: false,
+            message: 'Validation failed',
+            errors: errors.array(),
+          });
+          return;
+        }
 
-      const userId = req.user!.id;
-      const { name, phoneNumber, photoUrl } = req.body;
+        if (!req.user) {
+          res.status(401).json({
+            success: false,
+            message: 'User not found',
+          });
+          return;
+        }
+
+        const userId = req.user.id;
+        const { name, phoneNumber, photoUrl } = req.body;
 
       const user = await User.findById(userId);
       if (!user) {
@@ -578,10 +663,10 @@ router.put(
       // Return updated user account
       res.status(200).json({
         name: user.name,
-        email: user.email,
+        email: user.email || null,
         photoUrl: user.photoUrl || null,
         phoneNumber: user.phoneNumber || null,
-        walletAddress: user.walletAddress || null,
+        walletAddress: user.primaryWallet || user.walletAddress || null,
         referralCode: user.referralCode || null,
         referredBy: user.referredBy ? user.referredBy.toString() : null,
         agentProfile: {

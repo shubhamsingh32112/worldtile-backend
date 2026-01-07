@@ -1,5 +1,5 @@
 import { Response, NextFunction } from 'express';
-import { AuthRequest } from './auth.middleware';
+import { ThirdwebAuthRequest } from './thirdwebAuth.middleware';
 import User from '../models/User.model';
 
 /**
@@ -9,12 +9,12 @@ import User from '../models/User.model';
  */
 export const requireRole = (allowedRoles: ('USER' | 'AGENT' | 'ADMIN')[]) => {
   return async (
-    req: AuthRequest,
+    req: ThirdwebAuthRequest,
     res: Response,
     next: NextFunction
   ): Promise<void> => {
     try {
-      // First ensure user is authenticated
+      // First ensure user is authenticated (thirdwebAuth middleware should have set req.user)
       if (!req.user || !req.user.id) {
         res.status(401).json({
           success: false,

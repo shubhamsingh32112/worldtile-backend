@@ -1,5 +1,4 @@
 import mongoose, { Document, Schema } from 'mongoose';
-import bcrypt from 'bcryptjs';
 
 export interface IReferralStats {
   totalReferrals: number;
@@ -12,14 +11,22 @@ export interface IAgentProfile {
   joinedAt: Date;
 }
 
+export interface IWallet {
+  address: string;
+  type: 'EOA' | 'IN_APP';
+  provider: 'metamask' | 'walletconnect' | 'google' | 'email';
+  isPrimary: boolean;
+  createdAt: Date;
+}
+
 export interface IUser extends Document {
   name: string;
-  email: string;
-  password?: string;
-  firebaseUid?: string;
+  email?: string; // Optional - may not have email for EOA-only users
   photoUrl?: string;
   phoneNumber?: string;
-  walletAddress?: string;
+  walletAddress?: string; // DEPRECATED - kept for backward compatibility, use primaryWallet instead
+  wallets: IWallet[]; // All linked wallets
+  primaryWallet: string; // Canonical identity - address of primary wallet
   fullName?: string; // Full name for withdrawal profile
   tronWalletAddress?: string; // TRON wallet address for withdrawals
   savedWithdrawalDetails?: boolean; // Whether user has saved withdrawal details
@@ -31,8 +38,37 @@ export interface IUser extends Document {
   agentProfile?: IAgentProfile;
   createdAt: Date;
   updatedAt: Date;
-  comparePassword(candidatePassword: string): Promise<boolean>;
 }
+
+const WalletSchema = new Schema<IWallet>(
+  {
+    address: {
+      type: String,
+      required: true,
+      trim: true,
+      lowercase: true,
+    },
+    type: {
+      type: String,
+      enum: ['EOA', 'IN_APP'],
+      required: true,
+    },
+    provider: {
+      type: String,
+      enum: ['metamask', 'walletconnect', 'google', 'email'],
+      required: true,
+    },
+    isPrimary: {
+      type: Boolean,
+      default: false,
+    },
+    createdAt: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  { _id: false }
+);
 
 const UserSchema = new Schema<IUser>(
   {
@@ -43,24 +79,12 @@ const UserSchema = new Schema<IUser>(
     },
     email: {
       type: String,
-      required: [true, 'Email is required'],
+      required: false, // Optional - EOA users may not have email
       unique: true,
+      sparse: true, // Allows multiple nulls but enforces uniqueness for non-null
       lowercase: true,
       trim: true,
       match: [/^\S+@\S+\.\S+$/, 'Please provide a valid email'],
-    },
-    password: {
-      type: String,
-      required: function() {
-        return !this.firebaseUid; // Password required only if not using Firebase
-      },
-      minlength: [6, 'Password must be at least 6 characters'],
-    },
-    firebaseUid: {
-      type: String,
-      unique: true,
-      sparse: true, // Allows multiple null values
-      trim: true,
     },
     photoUrl: {
       type: String,
@@ -72,7 +96,22 @@ const UserSchema = new Schema<IUser>(
     },
     walletAddress: {
       type: String,
+      required: false, // DEPRECATED - kept for backward compatibility
+      unique: false, // Remove unique constraint
       trim: true,
+      index: true,
+    },
+    wallets: {
+      type: [WalletSchema],
+      default: [],
+      required: true,
+    },
+    primaryWallet: {
+      type: String,
+      required: [true, 'Primary wallet address is required'],
+      trim: true,
+      lowercase: true,
+      index: true,
     },
     fullName: {
       type: String,
@@ -176,6 +215,39 @@ function generateReferralCode(userName: string): string {
 
 // Generate referral code before saving (if new user and no code exists)
 UserSchema.pre('save', async function (next) {
+  // Ensure wallets array exists
+  if (!this.wallets || this.wallets.length === 0) {
+    return next(new Error('User must have at least one wallet'));
+  }
+
+  // Ensure first wallet is marked as primary if no primaryWallet is set
+  if (!this.primaryWallet && this.wallets.length > 0) {
+    this.primaryWallet = this.wallets[0].address.toLowerCase();
+    this.wallets[0].isPrimary = true;
+  }
+
+  // Ensure exactly one wallet is marked as primary
+  const primaryCount = this.wallets.filter(w => w.isPrimary).length;
+  if (primaryCount === 0 && this.wallets.length > 0) {
+    this.wallets[0].isPrimary = true;
+    this.primaryWallet = this.wallets[0].address.toLowerCase();
+  } else if (primaryCount > 1) {
+    // If multiple are marked primary, keep only the first one
+    let foundFirst = false;
+    this.wallets.forEach(wallet => {
+      if (wallet.isPrimary && !foundFirst) {
+        foundFirst = true;
+      } else if (wallet.isPrimary) {
+        wallet.isPrimary = false;
+      }
+    });
+  }
+
+  // Backward compatibility: set walletAddress from primaryWallet if not set
+  if (!this.walletAddress && this.primaryWallet) {
+    this.walletAddress = this.primaryWallet;
+  }
+
   // Generate referral code if it doesn't exist
   if (this.isNew && !this.referralCode) {
     let code: string = '';
@@ -230,36 +302,9 @@ UserSchema.pre(['updateOne', 'findOneAndUpdate', 'updateMany'], function (next) 
   next();
 });
 
-// Hash password before saving (only if password is provided)
-UserSchema.pre('save', async function (next) {
-  // Skip password hashing if no password or password not modified
-  if (!this.password || !this.isModified('password')) {
-    return next();
-  }
-
-  try {
-    const salt = await bcrypt.genSalt(10);
-    this.password = await bcrypt.hash(this.password, salt);
-    next();
-  } catch (error: any) {
-    next(error);
-  }
-});
-
-// Compare password method
-UserSchema.methods.comparePassword = async function (
-  candidatePassword: string
-): Promise<boolean> {
-  if (!this.password) {
-    return false; // Cannot compare if no password set (Firebase user)
-  }
-  return bcrypt.compare(candidatePassword, this.password);
-};
-
-// Remove password from JSON output
+// Remove password from JSON output (no longer needed, but keeping for safety)
 UserSchema.methods.toJSON = function () {
   const userObject = this.toObject();
-  delete userObject.password;
   return userObject;
 };
 

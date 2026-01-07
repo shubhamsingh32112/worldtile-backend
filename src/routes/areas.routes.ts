@@ -2,7 +2,7 @@ import express from 'express';
 import { body, validationResult } from 'express-validator';
 import Area from '../models/Area.model';
 import LandSlot from '../models/LandSlot.model';
-import { authenticate, AuthRequest } from '../middleware/auth.middleware';
+import { thirdwebAuth, ThirdwebAuthRequest } from '../middleware/thirdwebAuth.middleware';
 
 const router = express.Router();
 
@@ -62,14 +62,14 @@ router.get('/:areaKey', async (req, res) => {
 // @access  Private (requires authentication)
 router.post(
   '/:areaKey/buy',
-  authenticate,
+  thirdwebAuth,
   [
     body('quantity')
       .optional()
       .isInt({ min: 1 })
       .withMessage('Quantity must be a positive integer'),
   ],
-  async (req: AuthRequest, res: express.Response) => {
+  async (req: ThirdwebAuthRequest, res: express.Response) => {
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
@@ -177,7 +177,7 @@ router.post(
 // @route   GET /api/areas/:areaKey/available-slot
 // @desc    Get an available land slot for an area
 // @access  Private (requires authentication)
-router.get('/:areaKey/available-slot', authenticate, async (req: AuthRequest, res: express.Response): Promise<void> => {
+router.get('/:areaKey/available-slot', thirdwebAuth, async (req: ThirdwebAuthRequest, res: express.Response): Promise<void> => {
   try {
     const { areaKey } = req.params;
     const normalizedAreaKey = areaKey.toLowerCase().trim();
@@ -242,7 +242,7 @@ router.get('/:areaKey/available-slot', authenticate, async (req: AuthRequest, re
 // @route   GET /api/areas/:areaKey/available-slots
 // @desc    Get multiple available land slots for an area
 // @access  Private (requires authentication)
-router.get('/:areaKey/available-slots', authenticate, async (req: AuthRequest, res: express.Response): Promise<void> => {
+router.get('/:areaKey/available-slots', thirdwebAuth, async (req: ThirdwebAuthRequest, res: express.Response): Promise<void> => {
   try {
     const { areaKey } = req.params;
     const quantity = parseInt(req.query.quantity as string) || 1;

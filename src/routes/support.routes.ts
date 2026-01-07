@@ -1,5 +1,5 @@
 import express from 'express';
-import { authenticate, AuthRequest } from '../middleware/auth.middleware';
+import { thirdwebAuth, ThirdwebAuthRequest } from '../middleware/thirdwebAuth.middleware';
 import SupportTicket from '../models/SupportTicket.model';
 import mongoose from 'mongoose';
 
@@ -12,10 +12,17 @@ const router = express.Router();
  */
 router.post(
   '/user-query',
-  authenticate,
-  async (req: AuthRequest, res: express.Response): Promise<void> => {
+  thirdwebAuth,
+  async (req: ThirdwebAuthRequest, res: express.Response): Promise<void> => {
     try {
-      const userId = req.user!.id;
+      if (!req.user) {
+        res.status(401).json({
+          success: false,
+          message: 'User not found',
+        });
+        return;
+      }
+      const userId = req.user.id;
       const { withdrawalId, message } = req.body;
 
       // Validate input

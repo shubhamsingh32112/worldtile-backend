@@ -1,6 +1,6 @@
 import express from 'express';
 import { body, validationResult } from 'express-validator';
-import { authenticate, AuthRequest } from '../middleware/auth.middleware';
+import { thirdwebAuth, ThirdwebAuthRequest } from '../middleware/thirdwebAuth.middleware';
 import { OrdersController } from '../controllers/orders.controller';
 
 const router = express.Router();
@@ -9,7 +9,7 @@ const router = express.Router();
  * Validation middleware
  * Checks validation results and returns errors if any
  */
-const validate = (req: AuthRequest, res: express.Response, next: express.NextFunction): void => {
+const validate = (req: ThirdwebAuthRequest, res: express.Response, next: express.NextFunction): void => {
   const errors = validationResult(req);
   if (!errors.isEmpty()) {
     res.status(400).json({
@@ -29,7 +29,7 @@ const validate = (req: AuthRequest, res: express.Response, next: express.NextFun
  */
 router.post(
   '/create',
-  authenticate,
+  thirdwebAuth,
   [
     body('state')
       .trim()
@@ -54,7 +54,7 @@ router.post(
  */
 router.post(
   '/submit-tx',
-  authenticate,
+  thirdwebAuth,
   [
     body('orderId')
       .trim()
@@ -78,7 +78,7 @@ router.post(
  */
 router.get(
   '/',
-  authenticate,
+  thirdwebAuth,
   OrdersController.getUserOrders
 );
 
@@ -89,7 +89,7 @@ router.get(
  */
 router.get(
   '/:orderId',
-  authenticate,
+  thirdwebAuth,
   OrdersController.getOrderById
 
 );
@@ -101,7 +101,7 @@ router.get(
  */
 router.post(
   '/verify-payment',
-  authenticate,
+  thirdwebAuth,
   [
     body('orderId')
       .trim()
@@ -119,7 +119,7 @@ router.post(
  */
 router.post(
   '/auto-verify-payment',
-  authenticate,
+  thirdwebAuth,
   [
     body('orderId')
       .trim()

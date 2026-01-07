@@ -1,5 +1,5 @@
 import { Response } from 'express';
-import { AuthRequest } from '../middleware/auth.middleware';
+import { ThirdwebAuthRequest } from '../middleware/thirdwebAuth.middleware';
 import { OrdersService } from '../services/orders.service';
 
 /**
@@ -13,7 +13,7 @@ export class OrdersController {
    * @body { state: string, place: string, quantity: number }
    * Backend atomically assigns slots to prevent race conditions
    */
-  static async createOrder(req: AuthRequest, res: Response): Promise<Response> {
+  static async createOrder(req: ThirdwebAuthRequest, res: Response): Promise<Response> {
     try {
       const userId = req.user!.id;
       const { state, place, quantity } = req.body;
@@ -83,7 +83,7 @@ export class OrdersController {
    * Submit transaction hash for an order
    * POST /api/orders/submit-tx
    */
-  static async submitTransactionHash(req: AuthRequest, res: Response): Promise<Response> {
+  static async submitTransactionHash(req: ThirdwebAuthRequest, res: Response): Promise<Response> {
     try {
       const userId = req.user!.id;
       const { orderId, txHash } = req.body;
@@ -116,7 +116,7 @@ export class OrdersController {
    * Get order by ID
    * GET /api/orders/:orderId
    */
-  static async getOrderById(req: AuthRequest, res: Response): Promise<Response> {
+  static async getOrderById(req: ThirdwebAuthRequest, res: Response): Promise<Response> {
     try {
       const userId = req.user!.id;
       const { orderId } = req.params;
@@ -159,7 +159,7 @@ export class OrdersController {
    * Get all orders for the authenticated user
    * GET /api/orders
    */
-  static async getUserOrders(req: AuthRequest, res: Response): Promise<Response> {
+  static async getUserOrders(req: ThirdwebAuthRequest, res: Response): Promise<Response> {
     try {
       const userId = req.user!.id;
       const { status } = req.query;
@@ -202,7 +202,7 @@ export class OrdersController {
    * Verify payment for an order
    * POST /api/orders/verify-payment
    */
-  static async verifyPayment(req: AuthRequest, res: Response): Promise<Response> {
+  static async verifyPayment(req: ThirdwebAuthRequest, res: Response): Promise<Response> {
     try {
       const userId = req.user!.id;
       const { orderId } = req.body;
@@ -255,7 +255,7 @@ export class OrdersController {
    * Auto-verify payment for an order by checking recent transactions
    * POST /api/orders/auto-verify-payment
    */
-  static async autoVerifyPayment(req: AuthRequest, res: Response): Promise<Response> {
+  static async autoVerifyPayment(req: ThirdwebAuthRequest, res: Response): Promise<Response> {
     try {
       const userId = req.user!.id;
       const { orderId } = req.body;

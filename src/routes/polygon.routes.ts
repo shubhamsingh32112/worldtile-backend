@@ -1,6 +1,6 @@
 import express from 'express';
 import { body, validationResult } from 'express-validator';
-import { authenticate, AuthRequest } from '../middleware/auth.middleware';
+import { thirdwebAuth, ThirdwebAuthRequest } from '../middleware/thirdwebAuth.middleware';
 import Polygon from '../models/Polygon.model';
 
 const router = express.Router();
@@ -10,7 +10,7 @@ const router = express.Router();
 // @access  Private
 router.post(
   '/',
-  authenticate,
+  thirdwebAuth,
   [
     body('geometry')
       .isObject()
@@ -43,7 +43,7 @@ router.post(
       .isLength({ max: 500 })
       .withMessage('Description cannot exceed 500 characters'),
   ],
-  async (req: AuthRequest, res: express.Response) => {
+  async (req: ThirdwebAuthRequest, res: express.Response) => {
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
@@ -56,7 +56,14 @@ router.post(
       }
 
       const { geometry, areaInAcres, name, description } = req.body;
-      const userId = req.user!.id;
+      if (!req.user) {
+        res.status(401).json({
+          success: false,
+          message: 'User not found. Please ensure you are logged in.',
+        });
+        return;
+      }
+      const userId = req.user.id;
 
       const polygon = new Polygon({
         userId,
@@ -156,9 +163,16 @@ router.get('/nearby', async (req: express.Request, res: express.Response): Promi
 // @route   GET /api/polygons
 // @desc    Get all polygons for the authenticated user
 // @access  Private
-router.get('/', authenticate, async (req: AuthRequest, res: express.Response): Promise<void> => {
+router.get('/', thirdwebAuth, async (req: ThirdwebAuthRequest, res: express.Response): Promise<void> => {
   try {
-    const userId = req.user!.id;
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: 'User not found. Please ensure you are logged in.',
+      });
+      return;
+    }
+    const userId = req.user.id;
 
     const polygons = await Polygon.find({ userId })
       .sort({ createdAt: -1 })
@@ -191,10 +205,17 @@ router.get('/', authenticate, async (req: AuthRequest, res: express.Response): P
 // @route   GET /api/polygons/:id
 // @desc    Get a specific polygon by ID
 // @access  Private
-router.get('/:id', authenticate, async (req: AuthRequest, res: express.Response): Promise<void> => {
+router.get('/:id', thirdwebAuth, async (req: ThirdwebAuthRequest, res: express.Response): Promise<void> => {
   try {
     const { id } = req.params;
-    const userId = req.user!.id;
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: 'User not found. Please ensure you are logged in.',
+      });
+      return;
+    }
+    const userId = req.user.id;
 
     const polygon = await Polygon.findOne({ _id: id, userId });
 
@@ -241,7 +262,7 @@ router.get('/:id', authenticate, async (req: AuthRequest, res: express.Response)
 // @access  Private
 router.put(
   '/:id',
-  authenticate,
+  thirdwebAuth,
   [
     body('geometry')
       .optional()
@@ -272,7 +293,7 @@ router.put(
       .isLength({ max: 500 })
       .withMessage('Description cannot exceed 500 characters'),
   ],
-  async (req: AuthRequest, res: express.Response): Promise<void> => {
+  async (req: ThirdwebAuthRequest, res: express.Response): Promise<void> => {
     try {
       const errors = validationResult(req);
       if (!errors.isEmpty()) {
@@ -285,7 +306,14 @@ router.put(
       }
 
       const { id } = req.params;
-      const userId = req.user!.id;
+      if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: 'User not found. Please ensure you are logged in.',
+      });
+      return;
+    }
+    const userId = req.user.id;
       const updateData = req.body;
 
       const polygon = await Polygon.findOne({ _id: id, userId });
@@ -341,10 +369,17 @@ router.put(
 // @route   DELETE /api/polygons/:id
 // @desc    Delete a polygon
 // @access  Private
-router.delete('/:id', authenticate, async (req: AuthRequest, res: express.Response): Promise<void> => {
+router.delete('/:id', thirdwebAuth, async (req: ThirdwebAuthRequest, res: express.Response): Promise<void> => {
   try {
     const { id } = req.params;
-    const userId = req.user!.id;
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: 'User not found. Please ensure you are logged in.',
+      });
+      return;
+    }
+    const userId = req.user.id;
 
     const polygon = await Polygon.findOneAndDelete({ _id: id, userId });
 

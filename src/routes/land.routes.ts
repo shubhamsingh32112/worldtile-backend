@@ -1,5 +1,6 @@
 import express from 'express';
 // TODO: LandTile model and PostGIS config not implemented yet
+// import { thirdwebAuth, ThirdwebAuthRequest } from '../middleware/thirdwebAuth.middleware';
 // import LandTile from '../models/LandTile.model';
 // import { getSequelize } from '../config/postgis';
 // import { QueryTypes, Op } from 'sequelize';
@@ -27,14 +28,14 @@ router.get('/tiles/:tileId', async (req, res) => {
 // @route   GET /api/land/my-tiles
 // @desc    Get user's owned land tiles
 // @access  Private
-router.get('/my-tiles', authenticate, async (req: AuthRequest, res) => {
+router.get('/my-tiles', thirdwebAuth, async (req: ThirdwebAuthRequest, res) => {
   // Implementation commented out - LandTile model not available
 });
 
 // @route   POST /api/land/tiles/:tileId/purchase
 // @desc    Purchase a land tile
 // @access  Private
-router.post('/tiles/:tileId/purchase', authenticate, async (req: AuthRequest, res) => {
+router.post('/tiles/:tileId/purchase', thirdwebAuth, async (req: ThirdwebAuthRequest, res) => {
   // Implementation commented out - LandTile model not available
 });
 

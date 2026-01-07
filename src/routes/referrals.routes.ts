@@ -1,5 +1,5 @@
 import express from 'express';
-import { authenticate, AuthRequest } from '../middleware/auth.middleware';
+import { thirdwebAuth, ThirdwebAuthRequest } from '../middleware/thirdwebAuth.middleware';
 import { requireAgent } from '../middleware/role.middleware';
 import User from '../models/User.model';
 import ReferralEarning from '../models/ReferralEarning.model';
@@ -15,9 +15,16 @@ const router = express.Router();
  * @desc    Get referral earnings with "real estate agent" feel
  * @access  Private
  */
-router.get('/earnings', authenticate, async (req: AuthRequest, res: express.Response): Promise<void> => {
+router.get('/earnings', thirdwebAuth, async (req: ThirdwebAuthRequest, res: express.Response): Promise<void> => {
   try {
-    const userId = req.user!.id;
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: 'User not found',
+      });
+      return;
+    }
+    const userId = req.user.id;
 
     // Get user with referral stats
     const user = await User.findById(userId);
@@ -109,11 +116,18 @@ router.get('/earnings', authenticate, async (req: AuthRequest, res: express.Resp
  */
 router.post(
   '/withdraw',
-  authenticate,
+  thirdwebAuth,
   requireAgent,
-  async (req: AuthRequest, res: express.Response): Promise<void> => {
+  async (req: ThirdwebAuthRequest, res: express.Response): Promise<void> => {
     try {
-      const userId = req.user!.id;
+      if (!req.user) {
+        res.status(401).json({
+          success: false,
+          message: 'User not found. Please ensure you are logged in.',
+        });
+        return;
+      }
+      const userId = req.user.id;
       const { amount, walletAddress, fullName, email, phoneNumber, saveDetails } = req.body;
 
       // Validate input
@@ -278,11 +292,18 @@ router.post(
  */
 router.get(
   '/withdrawals/history',
-  authenticate,
+  thirdwebAuth,
   requireAgent,
-  async (req: AuthRequest, res: express.Response): Promise<void> => {
+  async (req: ThirdwebAuthRequest, res: express.Response): Promise<void> => {
     try {
-      const userId = req.user!.id;
+      if (!req.user) {
+        res.status(401).json({
+          success: false,
+          message: 'User not found. Please ensure you are logged in.',
+        });
+        return;
+      }
+      const userId = req.user.id;
 
       const withdrawals = await WithdrawalRequest.find({ agentId: userId })
         .sort({ createdAt: -1 })

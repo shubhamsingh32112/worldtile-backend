@@ -1,5 +1,5 @@
 import { Response } from 'express';
-import { AuthRequest } from '../middleware/auth.middleware';
+import { ThirdwebAuthRequest } from '../middleware/thirdwebAuth.middleware';
 import { AdminService } from '../services/admin.service';
 
 export class AdminController {
@@ -7,7 +7,7 @@ export class AdminController {
    * GET /api/admin/stats/overview
    * Get dashboard overview statistics
    */
-  static async getOverviewStats(_req: AuthRequest, res: Response): Promise<Response> {
+  static async getOverviewStats(_req: ThirdwebAuthRequest, res: Response): Promise<Response> {
     try {
       const stats = await AdminService.fetchStats();
       return res.status(200).json({
@@ -27,7 +27,7 @@ export class AdminController {
    * GET /api/admin/payments
    * Get paginated list of payments with filters
    */
-  static async getPayments(req: AuthRequest, res: Response): Promise<Response> {
+  static async getPayments(req: ThirdwebAuthRequest, res: Response): Promise<Response> {
     try {
       const data = await AdminService.getPayments(req.query);
       return res.status(200).json({
@@ -47,7 +47,7 @@ export class AdminController {
    * POST /api/admin/payments/:id/verify
    * Re-verify a payment transaction
    */
-  static async reVerifyPayment(req: AuthRequest, res: Response): Promise<Response> {
+  static async reVerifyPayment(req: ThirdwebAuthRequest, res: Response): Promise<Response> {
     try {
       const { id } = req.params;
       const adminId = req.user!.id;
@@ -74,7 +74,7 @@ export class AdminController {
    * GET /api/admin/withdrawals
    * Get withdrawal requests (pending and history)
    */
-  static async getWithdrawals(req: AuthRequest, res: Response): Promise<Response> {
+  static async getWithdrawals(req: ThirdwebAuthRequest, res: Response): Promise<Response> {
     try {
       const data = await AdminService.getWithdrawals(req.query);
       return res.status(200).json({
@@ -94,7 +94,7 @@ export class AdminController {
    * POST /api/admin/withdrawals/:id/approve
    * Approve a withdrawal request
    */
-  static async approveWithdrawal(req: AuthRequest, res: Response): Promise<Response> {
+  static async approveWithdrawal(req: ThirdwebAuthRequest, res: Response): Promise<Response> {
     try {
       const { id } = req.params;
       const { notes } = req.body;
@@ -118,7 +118,7 @@ export class AdminController {
    * POST /api/admin/withdrawals/:id/reject
    * Reject a withdrawal request
    */
-  static async rejectWithdrawal(req: AuthRequest, res: Response): Promise<Response> {
+  static async rejectWithdrawal(req: ThirdwebAuthRequest, res: Response): Promise<Response> {
     try {
       const { id } = req.params;
       const { notes } = req.body;
@@ -142,7 +142,7 @@ export class AdminController {
    * POST /api/admin/withdrawals/:id/mark-paid
    * Mark withdrawal as paid (COMPLETED) with transaction hash
    */
-  static async markWithdrawalAsPaid(req: AuthRequest, res: Response): Promise<Response> {
+  static async markWithdrawalAsPaid(req: ThirdwebAuthRequest, res: Response): Promise<Response> {
     try {
       const { id } = req.params;
       const { payoutTxHash, notes } = req.body;
@@ -183,7 +183,7 @@ export class AdminController {
    * GET /api/admin/earnings/business
    * Get business earnings (platform revenue stats)
    */
-  static async getBusinessEarnings(req: AuthRequest, res: Response): Promise<Response> {
+  static async getBusinessEarnings(req: ThirdwebAuthRequest, res: Response): Promise<Response> {
     try {
       const data = await AdminService.getBusinessEarnings(req.query);
       return res.status(200).json({
@@ -203,7 +203,7 @@ export class AdminController {
    * GET /api/admin/users/agents
    * Get list of agents
    */
-  static async getAgents(req: AuthRequest, res: Response): Promise<Response> {
+  static async getAgents(req: ThirdwebAuthRequest, res: Response): Promise<Response> {
     try {
       const data = await AdminService.getAgents(req.query);
       return res.status(200).json({
@@ -223,7 +223,7 @@ export class AdminController {
    * GET /api/admin/health
    * Admin health check endpoint
    */
-  static async getHealth(_req: AuthRequest, res: Response): Promise<Response> {
+  static async getHealth(_req: ThirdwebAuthRequest, res: Response): Promise<Response> {
     try {
       const health = await AdminService.getHealth();
       return res.status(200).json({
@@ -243,7 +243,7 @@ export class AdminController {
    * GET /api/admin/support/tickets
    * Get support tickets (paginated)
    */
-  static async getSupportTickets(req: AuthRequest, res: Response): Promise<Response> {
+  static async getSupportTickets(req: ThirdwebAuthRequest, res: Response): Promise<Response> {
     try {
       const data = await AdminService.getSupportTickets(req.query);
       return res.status(200).json({
@@ -263,7 +263,7 @@ export class AdminController {
    * PATCH /api/admin/support/:id/resolve
    * Resolve a support ticket
    */
-  static async resolveSupportTicket(req: AuthRequest, res: Response): Promise<Response> {
+  static async resolveSupportTicket(req: ThirdwebAuthRequest, res: Response): Promise<Response> {
     try {
       const { id } = req.params;
       const { response } = req.body;

@@ -1,6 +1,6 @@
 import express from 'express';
 import mongoose from 'mongoose';
-import { authenticate, AuthRequest } from '../middleware/auth.middleware';
+import { thirdwebAuth, ThirdwebAuthRequest } from '../middleware/thirdwebAuth.middleware';
 import Deed from '../models/Deed.model';
 import LandSlot from '../models/LandSlot.model';
 import UserLand from '../models/UserLand.model';
@@ -10,10 +10,17 @@ const router = express.Router();
 // @route   GET /api/deeds/:propertyId
 // @desc    Get deed by property ID (landSlotId)
 // @access  Private (requires authentication)
-router.get('/:propertyId', authenticate, async (req: AuthRequest, res: express.Response): Promise<void> => {
+router.get('/:propertyId', thirdwebAuth, async (req: ThirdwebAuthRequest, res: express.Response): Promise<void> => {
   try {
     const { propertyId } = req.params;
-    const userId = req.user!.id;
+    if (!req.user) {
+      res.status(401).json({
+        success: false,
+        message: 'User not found',
+      });
+      return;
+    }
+    const userId = req.user.id;
 
     // First, find the LandSlot by landSlotId (propertyId is the landSlotId)
     const landSlot = await LandSlot.findOne({ landSlotId: propertyId });

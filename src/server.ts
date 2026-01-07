@@ -2,14 +2,16 @@ import express from 'express'
 import cors from 'cors'
 import helmet from 'helmet'
 import morgan from 'morgan'
+import cookieParser from 'cookie-parser'
 import dotenv from 'dotenv'
+dotenv.config()
 import { connectMongoDB } from './config/mongodb'
-import authRoutes from './routes/auth.routes'
 import polygonRoutes from './routes/polygon.routes'
 import statesRoutes from './routes/states.routes'
 import areasRoutes from './routes/areas.routes'
 import ordersRoutes from './routes/orders.routes'
 import userRoutes from './routes/user.routes'
+import authRoutes from './routes/auth.routes'
 import referralsRoutes from './routes/referrals.routes'
 import deedsRoutes from './routes/deeds.routes'
 import subscriptionsRoutes from './routes/subscriptions.routes'
@@ -17,32 +19,49 @@ import adminRoutes from './routes/admin.routes'
 import supportRoutes from './routes/support.routes'
 
 // Load environment variables
-dotenv.config()
+
 
 const app = express()
 
 // Middleware
 app.use(helmet())
-// CORS configuration - allow all origins in development for mobile device testing
-const allowedOrigins = process.env.CORS_ORIGIN
-  ? process.env.CORS_ORIGIN.split(',').map((origin) => origin.trim())
-  : ['http://localhost:5173', 'http://localhost:3000', '*'] // Default: allow Vite dev server and all origins
+// CORS configuration
+const isDevelopment = process.env.NODE_ENV !== 'production'
+const corsOriginEnv = process.env.CORS_ORIGIN
+
+let allowedOrigins: string[] = []
+
+if (corsOriginEnv) {
+  // Use environment variable if set
+  allowedOrigins = corsOriginEnv.split(',').map((origin) => origin.trim())
+} else {
+  // Default origins for development
+  allowedOrigins = ['http://localhost:5173', 'http://localhost:3000']
+}
+
+// Always ensure localhost:5173 is allowed in development
+if (isDevelopment && !allowedOrigins.includes('http://localhost:5173')) {
+  allowedOrigins.push('http://localhost:5173')
+}
 
 app.use(
   cors({
     origin: (origin, callback) => {
       // Allow requests with no origin (like mobile apps or Postman)
-      if (!origin) return callback(null, true)
+      if (!origin) {
+        return callback(null, true)
+      }
 
-      // In development, allow all origins if CORS_ORIGIN is not set
-      if (!process.env.CORS_ORIGIN && process.env.NODE_ENV !== 'production') {
+      // In development without CORS_ORIGIN set, allow all origins
+      if (isDevelopment && !corsOriginEnv) {
         return callback(null, true)
       }
 
       // Check if origin is in allowed list
-      if (allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
+      if (allowedOrigins.includes(origin)) {
         callback(null, true)
       } else {
+        console.warn(`[CORS] Blocked origin: ${origin}. Allowed origins:`, allowedOrigins)
         callback(new Error('Not allowed by CORS'))
       }
     },
@@ -52,6 +71,7 @@ app.use(
   }),
 )
 app.use(morgan('dev'))
+app.use(cookieParser())
 // Custom logging middleware to track all incoming requests
 app.use((req, _res, next) => {
   const clientIp =
