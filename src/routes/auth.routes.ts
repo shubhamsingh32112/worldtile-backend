@@ -78,6 +78,11 @@ router.post(
       const address = (req.body.address as string).toLowerCase();
       const signature = req.body.signature as string;
       const referralCodeRaw = (req.body.referralCode as string | undefined)?.trim().toUpperCase();
+      // Profile data from thirdweb in-app wallet
+      const profileEmail = (req.body.email as string | undefined)?.trim().toLowerCase();
+      const profileName = (req.body.name as string | undefined)?.trim();
+      const profilePhone = (req.body.phone as string | undefined)?.trim();
+      const profileImage = (req.body.profileImage as string | undefined)?.trim();
 
       const user = await User.findOne({ walletAddress: address });
       if (!user || !user.authNonce) {
@@ -96,6 +101,20 @@ router.post(
           message: 'Signature verification failed',
         });
         return;
+      }
+
+      // Update user profile with data from thirdweb (if provided and not already set)
+      if (profileEmail && !user.email) {
+        user.email = profileEmail;
+      }
+      if (profileName && (!user.name || user.name === 'Wallet User')) {
+        user.name = profileName;
+      }
+      if (profilePhone && !user.phoneNumber) {
+        user.phoneNumber = profilePhone;
+      }
+      if (profileImage && !user.photoUrl) {
+        user.photoUrl = profileImage;
       }
 
       // If referral code provided and not yet set, attempt to set referredBy
