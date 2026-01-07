@@ -26,7 +26,7 @@ app.use(helmet())
 // CORS configuration - allow all origins in development for mobile device testing
 const allowedOrigins = process.env.CORS_ORIGIN
   ? process.env.CORS_ORIGIN.split(',').map((origin) => origin.trim())
-  : ['http://localhost:5173', 'http://localhost:3000', '*'] // Default: allow Vite dev server and all origins
+  : ['http://localhost:5173', 'http://localhost:3000'] // Default: allow Vite dev server
 
 app.use(
   cors({
@@ -34,13 +34,13 @@ app.use(
       // Allow requests with no origin (like mobile apps or Postman)
       if (!origin) return callback(null, true)
 
-      // In development, allow all origins if CORS_ORIGIN is not set
-      if (!process.env.CORS_ORIGIN && process.env.NODE_ENV !== 'production') {
+      // In development (non-production), allow all origins
+      if (process.env.NODE_ENV !== 'production') {
         return callback(null, true)
       }
 
-      // Check if origin is in allowed list
-      if (allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
+      // In production, check if origin is in allowed list
+      if (allowedOrigins.includes(origin)) {
         callback(null, true)
       } else {
         callback(new Error('Not allowed by CORS'))
@@ -116,21 +116,7 @@ app.use('/api/subscriptions', subscriptionsRoutes)
 app.use('/api/admin', adminRoutes)
 app.use('/api/support', supportRoutes)
 
-// 404 handler
-app.use((_req, res) => {
-  res.status(404).json({
-    success: false,
-    message: 'Route not found',
-  })
-})
-
-const PORT = process.env.PORT || 3000
-
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`)
-})
-
-// Error handler
+// Error handler (must be before 404 handler)
 app.use(
   (
     err: any,
@@ -173,5 +159,19 @@ app.use(
     return res.status(statusCode).json(responseBody);
   },
 )
+
+// 404 handler
+app.use((_req, res) => {
+  res.status(404).json({
+    success: false,
+    message: 'Route not found',
+  })
+})
+
+const PORT = process.env.PORT || 3000
+
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on http://localhost:${PORT}`)
+})
 
 export default app

@@ -3,6 +3,8 @@ import { body, validationResult } from 'express-validator';
 import User from '../models/User.model';
 import jwt from 'jsonwebtoken';
 import { authenticate, AuthRequest } from '../middleware/auth.middleware';
+import { verifyMessage } from 'ethers';
+import crypto from 'crypto';
 
 const router = express.Router();
 
@@ -18,6 +20,126 @@ const generateToken = (userId: string): string => {
     } as jwt.SignOptions
   );
 };
+
+// @route   GET /api/auth/nonce
+// @desc    Get a nonce for wallet-based login
+// @access  Public
+router.get('/nonce', async (req: express.Request, res: express.Response): Promise<void> => {
+  try {
+    const address = (req.query.address as string | undefined)?.toLowerCase();
+    if (!address) {
+      res.status(400).json({ success: false, message: 'Address is required' });
+      return;
+    }
+
+    // Create or find user by walletAddress
+    let user = await User.findOne({ walletAddress: address });
+    if (!user) {
+      user = new User({
+        walletAddress: address,
+        // minimal placeholder name to satisfy any consumers; schema allows missing name now for wallet users
+        name: 'Wallet User',
+      } as any);
+    }
+
+    const nonce = crypto.randomBytes(16).toString('hex');
+    user.authNonce = nonce;
+    await user.save();
+
+    res.status(200).json({ success: true, nonce });
+  } catch (error: any) {
+    console.error('Nonce error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Server error generating nonce',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+    });
+  }
+});
+
+// @route   POST /api/auth/verify
+// @desc    Verify wallet signature and issue JWT
+// @access  Public
+router.post(
+  '/verify',
+  [body('address').notEmpty(), body('signature').notEmpty()],
+  async (req: express.Request, res: express.Response): Promise<void> => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        res.status(400).json({
+          success: false,
+          message: 'Validation failed',
+          errors: errors.array(),
+        });
+        return;
+      }
+
+      const address = (req.body.address as string).toLowerCase();
+      const signature = req.body.signature as string;
+      const referralCodeRaw = (req.body.referralCode as string | undefined)?.trim().toUpperCase();
+
+      const user = await User.findOne({ walletAddress: address });
+      if (!user || !user.authNonce) {
+        res.status(400).json({
+          success: false,
+          message: 'Nonce not found. Please request a new nonce.',
+        });
+        return;
+      }
+
+      const message = `Login nonce: ${user.authNonce}`;
+      const recoveredAddress = verifyMessage(message, signature).toLowerCase();
+      if (recoveredAddress !== address) {
+        res.status(401).json({
+          success: false,
+          message: 'Signature verification failed',
+        });
+        return;
+      }
+
+      // If referral code provided and not yet set, attempt to set referredBy
+      if (referralCodeRaw && !user.referredBy) {
+        const referrer = await User.findOne({ referralCode: referralCodeRaw });
+        if (referrer && referrer._id.toString() !== user._id.toString()) {
+          user.referredBy = referrer._id;
+          // Increment referrer's totalReferrals if present
+          if (referrer.referralStats) {
+            referrer.referralStats.totalReferrals = (referrer.referralStats.totalReferrals || 0) + 1;
+            await referrer.save();
+          }
+        }
+      }
+
+      // Clear nonce to prevent replay
+      user.authNonce = undefined as any;
+      await user.save();
+
+      const token = generateToken(user._id.toString());
+      res.status(200).json({
+        success: true,
+        message: 'Authentication successful',
+        token,
+        user: {
+          id: user._id.toString(),
+          name: user.name,
+          email: user.email,
+          photoUrl: user.photoUrl,
+          firebaseUid: user.firebaseUid,
+          walletAddress: user.walletAddress,
+          role: user.role,
+        },
+      });
+    } catch (error: any) {
+      console.error('Verify error:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Server error during verification',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+      });
+    }
+  }
+);
 
 // @route   POST /api/auth/signup
 // @desc    Register a new user

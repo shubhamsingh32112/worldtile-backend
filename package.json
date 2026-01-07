@@ -38,6 +38,8 @@
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.0.3",
     "morgan": "^1.10.0",
+    "ethers": "^6.13.4",
+    "thirdweb": "^5.116.1",
     "tiny-secp256k1": "^2.2.4",
     "tronweb": "^6.1.1"
   },
