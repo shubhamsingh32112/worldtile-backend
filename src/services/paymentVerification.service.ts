@@ -833,7 +833,7 @@ export class PaymentVerificationService {
         }
       }
 
-      // 4g. Create Deeds (one per landSlotId)
+      // 4g. Create Deeds (one per landSlotId) with NFT minting
       // Get land slots for deed creation
       const landSlotsForDeeds = await LandSlot.find(
         { landSlotId: { $in: order.landSlotIds } },
@@ -841,9 +841,19 @@ export class PaymentVerificationService {
         { session }
       );
 
-      // Get user for owner name
+      // Get user for owner name and Polygon wallet address
       const userForDeed = await User.findById(order.userId, null, { session });
       const ownerName = userForDeed?.name || 'Unknown';
+      
+      // Get user's Polygon wallet address (EVM address from thirdweb)
+      const polygonWalletAddress = userForDeed?.walletAddress;
+      if (!polygonWalletAddress) {
+        throw new Error('User does not have a wallet address. Cannot mint NFT.');
+      }
+
+      // Import NFT minting service
+      const { NFTMintingService } = await import('./nftMinting.service');
+      const nftContractAddress = process.env.NFT_CONTRACT_ADDRESS || '';
 
       for (const landSlot of landSlotsForDeeds) {
         // Check if deed already exists (idempotent)
@@ -857,8 +867,55 @@ export class PaymentVerificationService {
           // Generate seal number (unique identifier for deed)
           const sealNo = `DEED-${landSlot.landSlotId.toUpperCase()}-${Date.now()}`;
 
-          // Create deed with required fields
-          // Note: Some fields (NFT, coordinates) may need to be populated from LandSlot or generated
+          // Mint NFT on Polygon for this land slot
+          let nftData: {
+            tokenId: string;
+            contractAddress: string;
+            blockchain: string;
+            standard: string;
+            mintTxHash?: string;
+            openSeaUrl?: string;
+          } = {
+            tokenId: `NFT-${landSlot.landSlotId}`, // Placeholder
+            contractAddress: nftContractAddress || 'TBD',
+            blockchain: 'POLYGON',
+            standard: 'ERC721',
+          };
+
+          // Attempt to mint NFT
+          try {
+            console.log(`🎨 Minting NFT for land slot: ${landSlot.landSlotId}`);
+            const mintResult = await NFTMintingService.mintNFT(polygonWalletAddress, {
+              name: `WorldTile Deed - ${landSlot.landSlotId}`,
+              description: `Virtual land deed for ${landSlot.areaName || landSlot.areaKey}, Plot ID: ${landSlot.landSlotId}`,
+              attributes: [
+                { trait_type: 'Plot ID', value: landSlot.landSlotId },
+                { trait_type: 'City', value: landSlot.areaName || landSlot.areaKey },
+                { trait_type: 'State', value: landSlot.stateKey || 'Unknown' },
+                { trait_type: 'Owner', value: ownerName },
+                { trait_type: 'Seal Number', value: sealNo },
+              ],
+            });
+
+            // Update NFT data with minted information
+            nftData = {
+              tokenId: mintResult.tokenId,
+              contractAddress: nftContractAddress,
+              blockchain: 'POLYGON',
+              standard: 'ERC721',
+              mintTxHash: mintResult.transactionHash,
+              openSeaUrl: NFTMintingService.generateOpenSeaUrl(nftContractAddress, mintResult.tokenId),
+            };
+
+            console.log(`✅ NFT minted successfully! TokenId: ${mintResult.tokenId}, OpenSea: ${nftData.openSeaUrl}`);
+          } catch (mintError: any) {
+            console.error(`❌ Failed to mint NFT for ${landSlot.landSlotId}:`, mintError.message);
+            // Continue with placeholder NFT data - deed will be created but NFT minting failed
+            // This allows the payment to complete even if NFT minting fails
+            // The NFT can be minted later via a retry mechanism
+          }
+
+          // Create deed with NFT data
           const deed = new Deed({
             userId: order.userId,
             propertyId: landSlot._id,
@@ -870,12 +927,7 @@ export class PaymentVerificationService {
             city: landSlot.areaName || landSlot.areaKey, // Use area name as city
             latitude: 0, // TODO: Get from LandSlot or Area model if available
             longitude: 0, // TODO: Get from LandSlot or Area model if available
-            nft: {
-              tokenId: `NFT-${landSlot.landSlotId}`, // Placeholder - should be generated when NFT is minted
-              contractAddress: process.env.NFT_CONTRACT_ADDRESS || 'TBD', // Should be set in env, using placeholder for now
-              blockchain: 'TRON', // Default blockchain
-              standard: 'TRC721', // NFT standard
-            },
+            nft: nftData,
             payment: {
               transactionId: matchingTxHash.trim(),
               receiver: ledgerAddress,

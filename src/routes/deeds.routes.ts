@@ -69,6 +69,8 @@ router.get('/:propertyId', authenticate, async (req: AuthRequest, res: express.R
           contractAddress: deed.nft.contractAddress,
           blockchain: deed.nft.blockchain,
           standard: deed.nft.standard,
+          mintTxHash: deed.nft.mintTxHash || null,
+          openSeaUrl: deed.nft.openSeaUrl || null,
         },
         payment: {
           transactionId: deed.payment.transactionId,
