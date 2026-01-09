@@ -9,7 +9,7 @@ export class PricingService {
    */
   static async calculateUSDTAmount(): Promise<string> {
     // Fixed price: 110 USDT per tile for all areas
-    const priceInUSDT = 9;
+    const priceInUSDT = 110;
     
     // Return as string with 6 decimal places for USDT precision
     return priceInUSDT.toFixed(6);
