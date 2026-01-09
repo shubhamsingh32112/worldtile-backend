@@ -855,6 +855,9 @@ export class PaymentVerificationService {
       const { NFTMintingService } = await import('./nftMinting.service');
       const nftContractAddress = process.env.NFT_CONTRACT_ADDRESS || '';
 
+      // Track created deeds for email sending (after transaction commits)
+      const createdDeedIds: string[] = [];
+
       for (const landSlot of landSlotsForDeeds) {
         // Check if deed already exists (idempotent)
         const existingDeed = await Deed.findOne(
@@ -925,8 +928,8 @@ export class PaymentVerificationService {
             ownerName: ownerName,
             plotId: landSlot.landSlotId, // Use landSlotId as plotId
             city: landSlot.areaName || landSlot.areaKey, // Use area name as city
-            latitude: 0, // TODO: Get from LandSlot or Area model if available
-            longitude: 0, // TODO: Get from LandSlot or Area model if available
+            latitude: landSlot.latitude || 0, // Get from LandSlot
+            longitude: landSlot.longitude || 0, // Get from LandSlot
             nft: nftData,
             payment: {
               transactionId: matchingTxHash.trim(),
@@ -937,12 +940,37 @@ export class PaymentVerificationService {
           });
 
           await deed.save({ session });
+          createdDeedIds.push(deed._id.toString());
         }
       }
 
       // Commit transaction
       await session.commitTransaction();
       session.endSession();
+
+      // Send emails after transaction commits successfully
+      // This happens outside the transaction so email failures don't affect payment processing
+      if (createdDeedIds.length > 0) {
+        try {
+          const { EmailService } = await import('./email.service');
+          const DeedModel = await import('../models/Deed.model');
+          
+          // Send email for each created deed
+          for (const deedId of createdDeedIds) {
+            const deed = await DeedModel.default.findById(deedId);
+            if (deed) {
+              // Send email asynchronously (don't await to avoid blocking)
+              EmailService.sendDeedEmailAfterPurchase(deed).catch((emailError: any) => {
+                console.error(`❌ Failed to send email for deed ${deed.landSlotId}:`, emailError.message);
+                // Continue with other emails even if one fails
+              });
+            }
+          }
+        } catch (emailServiceError: any) {
+          // Log error but don't throw - email failures shouldn't affect payment success
+          console.error(`❌ Email service error (non-critical):`, emailServiceError.message);
+        }
+      }
 
       return {
         success: true,

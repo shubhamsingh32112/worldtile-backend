@@ -7,6 +7,8 @@ export interface ILandSlot extends Document {
   areaKey: string;
   areaName: string;
   slotNumber: number; // Slot number within the area (1, 2, 3, ...)
+  latitude?: number; // Latitude coordinate for the area
+  longitude?: number; // Longitude coordinate for the area
   status: 'AVAILABLE' | 'LOCKED' | 'SOLD';
   lockedBy?: mongoose.Types.ObjectId; // User ID who locked this slot
   lockExpiresAt?: Date; // When the lock expires (15 minutes from lock time)
@@ -53,6 +55,14 @@ const LandSlotSchema = new Schema<ILandSlot>(
       type: Number,
       required: [true, 'Slot number is required'],
       min: [1, 'Slot number must be at least 1'],
+    },
+    latitude: {
+      type: Number,
+      default: null,
+    },
+    longitude: {
+      type: Number,
+      default: null,
     },
     status: {
       type: String,
