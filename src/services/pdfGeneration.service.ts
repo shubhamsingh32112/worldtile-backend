@@ -1,9 +1,11 @@
-import puppeteer from 'puppeteer';
+import puppeteer from 'puppeteer-core';
+import chromium from '@sparticuz/chromium';
 import { IDeed } from '../models/Deed.model';
 
 /**
  * PDF Generation Service
  * Generates PDF deeds from HTML template
+ * Uses puppeteer-core + @sparticuz/chromium for Vercel/serverless compatibility
  */
 export class PDFGenerationService {
   /**
@@ -15,10 +17,13 @@ export class PDFGenerationService {
   static async generateDeedPDF(deed: IDeed, priceUSDT?: string): Promise<Buffer> {
     const html = this.generateHTML(deed, priceUSDT);
 
-    // Launch browser
+    // Launch browser with serverless-compatible Chrome
+    // @sparticuz/chromium provides a Lambda-compatible Chrome binary
+    // This works on Vercel, AWS Lambda, and other serverless platforms
     const browser = await puppeteer.launch({
-      headless: true,
-      args: ['--no-sandbox', '--disable-setuid-sandbox'],
+      args: chromium.args,
+      executablePath: await chromium.executablePath(),
+      headless: chromium.headless,
     });
 
     try {
