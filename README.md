@@ -51,6 +51,13 @@ POSTGRES_PASSWORD=postgres
 JWT_SECRET=your-super-secret-jwt-key-change-this-in-production
 JWT_EXPIRE=7d
 CORS_ORIGIN=http://localhost:3000
+
+# Gmail OAuth2 Configuration (Optional - for sending deed emails)
+# See EMAIL_SETUP.md for detailed setup instructions
+GMAIL_USER=your-email@yourdomain.com
+GMAIL_CLIENT_ID=your-client-id.apps.googleusercontent.com
+GMAIL_CLIENT_SECRET=your-client-secret
+GMAIL_REFRESH_TOKEN=your-refresh-token
 ```
 
 3. **For Supabase Setup:**
@@ -114,6 +121,16 @@ backend/
 └── README.md
 ```
 
+## Email Service
+
+The backend can automatically send email notifications with deed PDFs after successful NFT purchases. To enable this feature:
+
+1. Follow the setup guide in [EMAIL_SETUP.md](./EMAIL_SETUP.md)
+2. Configure the Gmail OAuth2 credentials in your `.env` file
+3. Emails will be sent automatically when deeds are created
+
+**Note**: Email sending is non-blocking - if email fails, it won't affect the payment processing flow.
+
 ## Technologies Used
 
 - Express.js - Web framework
@@ -123,4 +140,6 @@ backend/
 - JWT - Authentication
 - bcryptjs - Password hashing
 - express-validator - Input validation
+- Puppeteer - PDF generation from HTML
+- Nodemailer - Email sending via Gmail OAuth2
 

@@ -14,12 +14,13 @@ export interface IAgentProfile {
 
 export interface IUser extends Document {
   name: string;
-  email: string;
+  email?: string;
   password?: string;
   firebaseUid?: string;
   photoUrl?: string;
   phoneNumber?: string;
   walletAddress?: string;
+  authNonce?: string; // Nonce for wallet-based SIWE login
   fullName?: string; // Full name for withdrawal profile
   tronWalletAddress?: string; // TRON wallet address for withdrawals
   savedWithdrawalDetails?: boolean; // Whether user has saved withdrawal details
@@ -38,13 +39,24 @@ const UserSchema = new Schema<IUser>(
   {
     name: {
       type: String,
-      required: [true, 'Name is required'],
+      required: function () {
+        // Required only for non-wallet / non-firebase users
+        // eslint-disable-next-line @typescript-eslint/no-this-alias
+        const self: any = this;
+        return !self.walletAddress && !self.firebaseUid;
+      },
       trim: true,
     },
     email: {
       type: String,
-      required: [true, 'Email is required'],
+      required: function () {
+        // Required only for non-wallet / non-firebase users
+        // eslint-disable-next-line @typescript-eslint/no-this-alias
+        const self: any = this;
+        return !self.walletAddress && !self.firebaseUid;
+      },
       unique: true,
+      sparse: true, // Allows multiple null values for wallet-only users
       lowercase: true,
       trim: true,
       match: [/^\S+@\S+\.\S+$/, 'Please provide a valid email'],
@@ -52,7 +64,10 @@ const UserSchema = new Schema<IUser>(
     password: {
       type: String,
       required: function() {
-        return !this.firebaseUid; // Password required only if not using Firebase
+        // Password required only if not using Firebase or wallet
+        // eslint-disable-next-line @typescript-eslint/no-this-alias
+        const self: any = this;
+        return !self.firebaseUid && !self.walletAddress;
       },
       minlength: [6, 'Password must be at least 6 characters'],
     },
@@ -71,6 +86,13 @@ const UserSchema = new Schema<IUser>(
       trim: true,
     },
     walletAddress: {
+      type: String,
+      unique: true,
+      sparse: true, // Allows multiple nulls but enforces uniqueness for non-null
+      lowercase: true,
+      trim: true,
+    },
+    authNonce: {
       type: String,
       trim: true,
     },

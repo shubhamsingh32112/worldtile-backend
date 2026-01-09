@@ -166,8 +166,8 @@ const createMissingDeeds = async (): Promise<void> => {
           ownerName: ownerName,
           plotId: landSlot.landSlotId, // Use landSlotId as plotId
           city: landSlot.areaName || landSlot.areaKey, // Use area name as city
-          latitude: 0, // TODO: Get from LandSlot or Area model if available
-          longitude: 0, // TODO: Get from LandSlot or Area model if available
+            latitude: landSlot.latitude || 0, // Get from LandSlot
+            longitude: landSlot.longitude || 0, // Get from LandSlot
           nft: {
             tokenId: `NFT-${landSlot.landSlotId}`, // Placeholder - should be generated when NFT is minted
             contractAddress: process.env.NFT_CONTRACT_ADDRESS || 'TBD', // Should be set in env
