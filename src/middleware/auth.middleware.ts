@@ -5,7 +5,7 @@ import User from '../models/User.model';
 export interface AuthRequest extends Request {
   user?: {
     id: string;
-    email: string;
+    email?: string;
     name: string;
     role?: 'USER' | 'AGENT' | 'ADMIN'; // Added by role middleware
   };
@@ -44,7 +44,7 @@ export const authenticate = async (
 
     req.user = {
       id: user._id.toString(),
-      email: user.email,
+      email: user.email || undefined,
       name: user.name,
     };
 

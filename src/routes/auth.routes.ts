@@ -209,7 +209,7 @@ router.post(
         
         if (referrer) {
           // Hard rule: Cannot refer yourself
-          if (referrer.email.toLowerCase() === email.toLowerCase()) {
+          if (referrer.email && referrer.email.toLowerCase() === email.toLowerCase()) {
             res.status(400).json({
               success: false,
               message: 'Cannot refer yourself',
@@ -219,7 +219,7 @@ router.post(
           // Hard rule: Prevent referral loops (A → B → A)
           if (referrer.referredBy) {
             const referrerOfReferrer = await User.findById(referrer.referredBy);
-            if (referrerOfReferrer && referrerOfReferrer.email.toLowerCase() === email.toLowerCase()) {
+            if (referrerOfReferrer && referrerOfReferrer.email && referrerOfReferrer.email.toLowerCase() === email.toLowerCase()) {
               res.status(400).json({
                 success: false,
                 message: 'Referral loop detected',
@@ -409,7 +409,7 @@ router.post(
           
           if (referrer) {
             // Hard rule: Cannot refer yourself
-            if (referrer.email.toLowerCase() === email.toLowerCase()) {
+            if (referrer.email && referrer.email.toLowerCase() === email.toLowerCase()) {
               res.status(400).json({
                 success: false,
                 message: 'Cannot refer yourself',
@@ -420,7 +420,7 @@ router.post(
             // Check if referrer was referred by this email (would create loop)
             if (referrer.referredBy) {
               const referrerOfReferrer = await User.findById(referrer.referredBy);
-              if (referrerOfReferrer && referrerOfReferrer.email.toLowerCase() === email.toLowerCase()) {
+              if (referrerOfReferrer && referrerOfReferrer.email && referrerOfReferrer.email.toLowerCase() === email.toLowerCase()) {
                 res.status(400).json({
                   success: false,
                   message: 'Referral loop detected',

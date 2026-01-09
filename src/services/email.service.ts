@@ -1,4 +1,5 @@
 import nodemailer from 'nodemailer';
+import mongoose from 'mongoose';
 import { PDFGenerationService } from './pdfGeneration.service';
 import { IDeed } from '../models/Deed.model';
 import User from '../models/User.model';
@@ -255,12 +256,28 @@ export class EmailService {
    */
   static async sendDeedEmailAfterPurchase(deed: IDeed): Promise<void> {
     try {
-      // Populate user if not already populated
-      let user;
-      if (typeof deed.userId === 'object' && deed.userId !== null) {
-        user = deed.userId as any;
+      // Always query user directly to avoid ObjectId/Buffer confusion
+      // Check if userId is already a populated User document (has email property)
+      const isPopulatedUser =
+        deed.userId &&
+        typeof deed.userId === 'object' &&
+        !(deed.userId instanceof mongoose.Types.ObjectId) &&
+        'email' in deed.userId;
+
+      let user: any;
+
+      if (isPopulatedUser) {
+        // Already populated, convert to plain object
+        user =
+          typeof (deed.userId as any).toObject === 'function'
+            ? (deed.userId as any).toObject()
+            : deed.userId;
       } else {
-        user = await User.findById(deed.userId);
+        // Query user directly - use lean() to get plain object (no getters, no magic)
+        const userId = deed.userId instanceof mongoose.Types.ObjectId 
+          ? deed.userId 
+          : new mongoose.Types.ObjectId(deed.userId);
+        user = await User.findById(userId).lean();
       }
 
       if (!user) {
@@ -268,14 +285,15 @@ export class EmailService {
         return;
       }
 
-      // Check if user has email
-      if (!user.email) {
+      // Check if user has email (handle undefined, null, and empty string)
+      const userEmail = user.email?.trim();
+      if (!userEmail) {
         console.warn(`⚠️ User ${user._id} does not have an email address, skipping email`);
         return;
       }
 
       // Send email
-      await this.sendDeedEmail(deed, user.email, user.name || user.fullName || 'Valued Customer');
+      await this.sendDeedEmail(deed, userEmail, user.name || user.fullName || 'Valued Customer');
     } catch (error: any) {
       // Log error but don't throw - email failures shouldn't break the payment flow
       console.error(`❌ Failed to send deed email for ${deed.landSlotId}:`, error.message);
