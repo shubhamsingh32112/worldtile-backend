@@ -1,6 +1,15 @@
 import puppeteer from 'puppeteer-core';
-import chromium from '@sparticuz/chromium';
 import { IDeed } from '../models/Deed.model';
+
+// Conditionally import chromium only in serverless environments
+let chromium: any = null;
+try {
+  if (process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME) {
+    chromium = require('@sparticuz/chromium');
+  }
+} catch (e) {
+  // chromium not available, will use local Chrome
+}
 
 /**
  * PDF Generation Service
@@ -17,14 +26,56 @@ export class PDFGenerationService {
   static async generateDeedPDF(deed: IDeed, priceUSDT?: string): Promise<Buffer> {
     const html = this.generateHTML(deed, priceUSDT);
 
-    // Launch browser with serverless-compatible Chrome
-    // @sparticuz/chromium provides a Lambda-compatible Chrome binary
-    // This works on Vercel, AWS Lambda, and other serverless platforms
-    const browser = await puppeteer.launch({
-      args: chromium.args,
-      executablePath: await chromium.executablePath(),
-      headless: chromium.headless,
-    });
+    // Launch browser - use serverless chromium in production, regular Chrome locally
+    const isServerless = process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME;
+    
+    let launchOptions: any = {
+      headless: true,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-gpu',
+      ],
+    };
+
+    if (isServerless && chromium) {
+      // Use serverless-compatible Chrome for Lambda/Vercel
+      launchOptions.args = chromium.args;
+      launchOptions.executablePath = await chromium.executablePath();
+      launchOptions.headless = chromium.headless;
+    } else {
+      // For local development, try to find Chrome in common locations
+      const fs = require('fs');
+      const os = require('os');
+      const possiblePaths = [
+        process.env.PUPPETEER_EXECUTABLE_PATH, // Custom path from env
+        'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', // Windows
+        'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe', // Windows 32-bit
+        `C:\\Users\\${os.userInfo().username}\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe`, // Windows user
+      ].filter(Boolean);
+
+      // Try to find Chrome
+      for (const path of possiblePaths) {
+        try {
+          if (fs.existsSync(path)) {
+            launchOptions.executablePath = path;
+            console.log(`✅ Using Chrome at: ${path}`);
+            break;
+          }
+        } catch (e) {
+          // Continue to next path
+        }
+      }
+
+      // If no Chrome found, let puppeteer-core try to find it
+      // or throw a helpful error
+      if (!launchOptions.executablePath) {
+        console.warn('⚠️  Chrome executable not found. Please install Chrome or set PUPPETEER_EXECUTABLE_PATH env var.');
+      }
+    }
+
+    const browser = await puppeteer.launch(launchOptions);
 
     try {
       const page = await browser.newPage();
@@ -369,8 +420,8 @@ export class PDFGenerationService {
           <text x="100" y="110" text-anchor="middle" font-size="10" fill="#4b5563">
             SEAL NO
           </text>
-          <text x="100" y="128" text-anchor="middle" font-size="9" fill="#1f2937" font-weight="700">
-            ${this.escapeHtml(sealNumber.substring(0, 18))}
+          <text x="100" y="128" text-anchor="middle" font-size="11" fill="#1f2937" font-weight="700">
+            ${this.escapeHtml(sealNumber)}
           </text>
         </svg>
       </div>

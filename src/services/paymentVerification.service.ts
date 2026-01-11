@@ -1,4 +1,5 @@
 import axios, { AxiosError } from 'axios';
+import { generateSealNumber } from '../utils/sealNumberGenerator';
 
 /**
  * TronGrid API Response Types
@@ -868,7 +869,8 @@ export class PaymentVerificationService {
 
         if (!existingDeed) {
           // Generate seal number (unique identifier for deed)
-          const sealNo = `DEED-${landSlot.landSlotId.toUpperCase()}-${Date.now()}`;
+          // Format: WT-XXXX (random 4-digit number)
+          const sealNo = await generateSealNumber();
 
           // Mint NFT on Polygon for this land slot
           let nftData: {

@@ -13,11 +13,14 @@
     "seed:states": "ts-node src/utils/seedStatesAndAreas.ts",
     "backfill": "ts-node src/utils/backfillData.ts",
     "retry:nft": "ts-node src/utils/retryFailedNFTMints.ts",
+    "update:deed-nft": "ts-node src/utils/updateDeedNFT.ts",
     "update:opensea": "ts-node src/utils/updateDeedOpenSeaUrls.ts",
     "check:deed": "ts-node src/utils/checkDeedStatus.ts",
     "send:deed-email": "ts-node src/utils/sendDeedEmail.ts",
     "list:deeds": "ts-node src/utils/listDeeds.ts",
     "migrate:plot-ids": "ts-node src/utils/migratePlotIds.ts",
+    "migrate:seal-numbers": "ts-node src/utils/migrateSealNumbers.ts",
+    "sync:userland": "ts-node src/utils/syncUserLandFromDeeds.ts",
     "update:coordinates": "ts-node src/utils/updateLandSlotCoordinates.ts"
   },
   "keywords": [

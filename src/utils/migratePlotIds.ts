@@ -2,6 +2,7 @@ import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 import LandSlot from '../models/LandSlot.model';
 import Deed from '../models/Deed.model';
+import UserLand from '../models/UserLand.model';
 
 // Load environment variables
 dotenv.config();
@@ -267,11 +268,78 @@ const migratePlotIds = async () => {
     // Also check deeds for existing plot IDs
     const existingDeeds = await Deed.find({});
     for (const deed of existingDeeds) {
-      if (deed.landSlotId.startsWith('WT-IND-')) {
+      if (deed.landSlotId && deed.landSlotId.startsWith('WT-IND-')) {
         existingPlotIds.add(deed.landSlotId);
       }
       if (deed.plotId && deed.plotId.startsWith('WT-IND-')) {
         existingPlotIds.add(deed.plotId);
+      }
+    }
+    
+    // Find orphaned deeds (deeds with old format plot IDs that don't match any land slot)
+    // Also find deeds whose landSlotId matches an already-migrated land slot
+    const orphanedDeeds: Array<{
+      _id: string;
+      oldPlotId: string;
+      oldLandSlotId: string;
+      matchedLandSlot?: { _id: string; newId: string };
+      stateName?: string;
+      areaName?: string;
+      city?: string;
+    }> = [];
+    
+    for (const deed of existingDeeds) {
+      // Skip if both plotId and landSlotId are already in new format
+      if (deed.plotId && deed.plotId.startsWith('WT-IND-') && 
+          deed.landSlotId && deed.landSlotId.startsWith('WT-IND-')) {
+        continue;
+      }
+      
+      // Check if this deed's landSlotId matches any land slot (migrated or not)
+      const matchingLandSlot = landSlots.find(ls => 
+        ls.landSlotId === deed.landSlotId || 
+        ls.landSlotId === deed.plotId
+      );
+      
+      // If land slot is already migrated, we need to update the deed
+      if (matchingLandSlot && matchingLandSlot.landSlotId.startsWith('WT-IND-')) {
+        orphanedDeeds.push({
+          _id: deed._id.toString(),
+          oldPlotId: deed.plotId || deed.landSlotId,
+          oldLandSlotId: deed.landSlotId,
+          matchedLandSlot: {
+            _id: matchingLandSlot._id.toString(),
+            newId: matchingLandSlot.landSlotId, // Already in new format
+          },
+          stateName: (deed as any).stateName,
+          areaName: (deed as any).areaName,
+          city: deed.city,
+        });
+        continue;
+      }
+      
+      // If not found in land slots and has old format, it's truly orphaned
+      if (!matchingLandSlot && deed.plotId && !deed.plotId.startsWith('WT-IND-')) {
+        orphanedDeeds.push({
+          _id: deed._id.toString(),
+          oldPlotId: deed.plotId,
+          oldLandSlotId: deed.landSlotId,
+          stateName: (deed as any).stateName,
+          areaName: (deed as any).areaName,
+          city: deed.city,
+        });
+      }
+    }
+    
+    if (orphanedDeeds.length > 0) {
+      const trulyOrphaned = orphanedDeeds.filter(d => !d.matchedLandSlot).length;
+      const alreadyMigrated = orphanedDeeds.filter(d => d.matchedLandSlot).length;
+      console.log(`\n⚠️  Found ${orphanedDeeds.length} deed(s) that need plot ID updates:`);
+      if (alreadyMigrated > 0) {
+        console.log(`   - ${alreadyMigrated} deed(s) linked to already-migrated land slots`);
+      }
+      if (trulyOrphaned > 0) {
+        console.log(`   - ${trulyOrphaned} orphaned deed(s) with old format plot IDs\n`);
       }
     }
 
@@ -315,12 +383,79 @@ const migratePlotIds = async () => {
       }
     }
 
+    // Process orphaned deeds - try to generate new plot IDs from deed data
+    const orphanedMigrations: Array<{
+      deedId: string;
+      oldPlotId: string;
+      oldLandSlotId: string; // Keep track of old landSlotId for UserLand updates
+      newPlotId: string;
+      plotNumber: string;
+    }> = [];
+    
+    if (orphanedDeeds.length > 0) {
+      console.log('\n📋 Processing deeds that need updates...\n');
+      for (const orphanedDeed of orphanedDeeds) {
+        let newPlotId: string;
+        let plotNumber: string;
+        
+        // If deed is linked to an already-migrated land slot, use that ID
+        if (orphanedDeed.matchedLandSlot) {
+          newPlotId = orphanedDeed.matchedLandSlot.newId;
+          plotNumber = newPlotId.split('-').pop() || 'N/A';
+          console.log(
+            `Linked to migrated: ${orphanedDeed.oldPlotId.padEnd(35)} → ${newPlotId.padEnd(35)}`
+          );
+        } else {
+          // Truly orphaned - generate new plot ID from deed data
+          // Try to extract state/city from old plot ID format (state_city_number)
+          const parts = orphanedDeed.oldPlotId.split('_');
+          let stateKey = '';
+          let areaKey = '';
+          
+          if (parts.length >= 2) {
+            stateKey = parts[0];
+            areaKey = parts.slice(1, -1).join('_'); // Everything except first and last part
+          }
+          
+          // Use city from deed if available
+          const areaName = orphanedDeed.city || orphanedDeed.areaName || areaKey;
+          const stateName = orphanedDeed.stateName || stateKey;
+          
+          newPlotId = generateNewPlotId(
+            stateKey,
+            stateName,
+            areaKey,
+            areaName,
+            existingPlotIds
+          );
+          
+          plotNumber = newPlotId.split('-').pop() || 'N/A';
+          
+          console.log(
+            `Orphaned: ${orphanedDeed.oldPlotId.padEnd(35)} → ${newPlotId.padEnd(35)} | ${(stateName || '').padEnd(15)} | ${(areaName || '').padEnd(20)}`
+          );
+        }
+        
+        orphanedMigrations.push({
+          deedId: orphanedDeed._id,
+          oldPlotId: orphanedDeed.oldPlotId,
+          oldLandSlotId: orphanedDeed.oldLandSlotId, // Keep for UserLand updates
+          newPlotId: newPlotId,
+          plotNumber: plotNumber,
+        });
+      }
+    }
+
     console.log('═'.repeat(120));
     console.log(`\n📊 Summary:`);
     console.log(`   - ${landSlots.length} land slot(s) to update`);
     
     const totalDeeds = migrations.reduce((sum, m) => sum + m.deedIds.length, 0);
-    console.log(`   - ${totalDeeds} deed(s) to update`);
+    const totalOrphanedDeeds = orphanedMigrations.length;
+    console.log(`   - ${totalDeeds} deed(s) linked to land slots to update`);
+    if (totalOrphanedDeeds > 0) {
+      console.log(`   - ${totalOrphanedDeeds} orphaned deed(s) to update`);
+    }
     console.log(`   - ${execute ? '✅ Will execute migration' : '🔍 Dry run only'}`);
 
     if (!execute) {
@@ -337,6 +472,8 @@ const migratePlotIds = async () => {
     let landSlotFail = 0;
     let deedSuccess = 0;
     let deedFail = 0;
+    let userLandSuccess = 0;
+    let userLandFail = 0;
 
     for (const migration of migrations) {
       try {
@@ -349,13 +486,24 @@ const migratePlotIds = async () => {
         console.log(`✅ Updated land slot: ${migration.oldId} → ${migration.newId}`);
 
         // Update all deeds that reference this landSlotId
+        // Use direct MongoDB collection update to bypass Mongoose immutability hooks
         if (migration.deedIds.length > 0) {
-          const result = await Deed.updateMany(
-            { _id: { $in: migration.deedIds } },
+          if (!mongoose.connection.db) {
+            throw new Error('MongoDB connection not established');
+          }
+          
+          const deedsCollection = mongoose.connection.db.collection('deeds');
+          
+          // Convert string IDs to ObjectIds
+          const deedObjectIds = migration.deedIds.map(id => new mongoose.Types.ObjectId(id));
+          
+          const result = await deedsCollection.updateMany(
+            { _id: { $in: deedObjectIds } },
             {
               $set: {
                 landSlotId: migration.newId,
                 plotId: migration.newId, // Also update plotId field
+                updatedAt: new Date(), // Update timestamp
               },
             }
           );
@@ -363,9 +511,86 @@ const migratePlotIds = async () => {
           deedSuccess += result.modifiedCount;
           console.log(`   └─ Updated ${result.modifiedCount} deed(s)`);
         }
+        
+        // Update UserLand records that reference this landSlotId
+        if (!mongoose.connection.db) {
+          throw new Error('MongoDB connection not established');
+        }
+        
+        const userLandsCollection = mongoose.connection.db.collection('userlands');
+        const userLandResult = await userLandsCollection.updateMany(
+          { landSlotId: migration.oldId },
+          {
+            $set: {
+              landSlotId: migration.newId,
+              updatedAt: new Date(),
+            },
+          }
+        );
+        
+        if (userLandResult.modifiedCount > 0) {
+          console.log(`   └─ Updated ${userLandResult.modifiedCount} user land record(s)`);
+        }
       } catch (error: any) {
         landSlotFail++;
         console.error(`❌ Failed to update ${migration.oldId}:`, error.message);
+      }
+    }
+    
+    // Process orphaned deeds
+    if (orphanedMigrations.length > 0) {
+      console.log('\n🔄 Updating orphaned deeds...\n');
+      
+      if (!mongoose.connection.db) {
+        throw new Error('MongoDB connection not established');
+      }
+      
+      const deedsCollection = mongoose.connection.db.collection('deeds');
+      
+      for (const orphanedMigration of orphanedMigrations) {
+        try {
+          const deedObjectId = new mongoose.Types.ObjectId(orphanedMigration.deedId);
+          
+          const result = await deedsCollection.updateOne(
+            { _id: deedObjectId },
+            {
+              $set: {
+                landSlotId: orphanedMigration.newPlotId,
+                plotId: orphanedMigration.newPlotId,
+                updatedAt: new Date(),
+              },
+            }
+          );
+          
+          if (result.modifiedCount > 0) {
+            deedSuccess++;
+            console.log(`✅ Updated orphaned deed: ${orphanedMigration.oldPlotId} → ${orphanedMigration.newPlotId}`);
+          } else {
+            deedFail++;
+            console.log(`⚠️  Deed ${orphanedMigration.deedId} not found or already updated`);
+          }
+          
+          // Also update UserLand records for orphaned deeds
+          // Use oldLandSlotId since UserLand uses landSlotId, not plotId
+          const userLandsCollection = mongoose.connection.db.collection('userlands');
+          const userLandResult = await userLandsCollection.updateMany(
+            { landSlotId: orphanedMigration.oldLandSlotId },
+            {
+              $set: {
+                landSlotId: orphanedMigration.newPlotId,
+                updatedAt: new Date(),
+              },
+            }
+          );
+          
+          if (userLandResult.modifiedCount > 0) {
+            userLandSuccess += userLandResult.modifiedCount;
+            console.log(`   └─ Updated ${userLandResult.modifiedCount} user land record(s)`);
+          }
+        } catch (error: any) {
+          deedFail++;
+          console.error(`❌ Failed to update orphaned deed ${orphanedMigration.oldPlotId}:`, error.message);
+        }
       }
     }
 
@@ -374,6 +599,7 @@ const migratePlotIds = async () => {
     console.log('📊 Results:');
     console.log(`   Land Slots: ${landSlotSuccess} updated, ${landSlotFail} failed`);
     console.log(`   Deeds: ${deedSuccess} updated, ${deedFail} failed`);
+    console.log(`   UserLands: ${userLandSuccess} updated, ${userLandFail} failed`);
     console.log('═'.repeat(120));
 
     // Disconnect

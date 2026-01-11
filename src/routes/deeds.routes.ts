@@ -14,25 +14,16 @@ router.get('/:propertyId', authenticate, async (req: AuthRequest, res: express.R
   try {
     const { propertyId } = req.params;
     const userId = req.user!.id;
+    const userIdObj = new mongoose.Types.ObjectId(userId);
 
-    // First, find the LandSlot by landSlotId (propertyId is the landSlotId)
-    const landSlot = await LandSlot.findOne({ landSlotId: propertyId });
-
-    if (!landSlot) {
-      res.status(404).json({
-        success: false,
-        message: 'Property not found',
-      });
-      return;
-    }
-
-    // Validate user owns the property
+    // Validate user owns the property by checking UserLand first
     const userLand = await UserLand.findOne({
-      userId: new mongoose.Types.ObjectId(userId),
+      userId: userIdObj,
       landSlotId: propertyId,
     });
 
     if (!userLand) {
+      console.error(`[GET /api/deeds/:propertyId] UserLand not found for propertyId: ${propertyId}, userId: ${userId}`);
       res.status(403).json({
         success: false,
         message: 'You do not own this property',
@@ -40,10 +31,34 @@ router.get('/:propertyId', authenticate, async (req: AuthRequest, res: express.R
       return;
     }
 
-    // Find the deed by propertyId (using LandSlot _id)
-    const deed = await Deed.findOne({ propertyId: landSlot._id });
+    // Find the deed by userId and landSlotId (propertyId)
+    // Try multiple approaches to find the deed
+    let deed = await Deed.findOne({
+      userId: userIdObj,
+      landSlotId: propertyId,
+    });
+
+    // Fallback: if not found, try using the UserLand's landSlotId (in case of mismatch)
+    if (!deed && userLand.landSlotId !== propertyId) {
+      deed = await Deed.findOne({
+        userId: userIdObj,
+        landSlotId: userLand.landSlotId,
+      });
+    }
+
+    // Additional fallback: try finding by propertyId reference (via LandSlot)
+    if (!deed) {
+      const landSlot = await LandSlot.findOne({ landSlotId: propertyId });
+      if (landSlot) {
+        deed = await Deed.findOne({
+          userId: userIdObj,
+          propertyId: landSlot._id,
+        });
+      }
+    }
 
     if (!deed) {
+      console.error(`[GET /api/deeds/:propertyId] Deed not found for propertyId: ${propertyId}, userId: ${userId}`);
       res.status(404).json({
         success: false,
         message: 'Deed not found for this property',

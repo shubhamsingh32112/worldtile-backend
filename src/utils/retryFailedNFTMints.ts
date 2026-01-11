@@ -57,10 +57,13 @@ const retryFailedNFTMints = async () => {
     const landSlotId = process.argv[2];
 
     // Find deeds that need NFT minting retry
-    // Look for deeds with placeholder tokenIds (starting with "NFT-")
+    // Look for deeds with placeholder tokenIds (starting with "NFT-") OR missing proper NFT data
     const query: any = {
-      'nft.tokenId': { $regex: /^NFT-/ }, // Placeholder tokenId pattern
-      'nft.openSeaUrl': { $exists: false }, // No OpenSea URL means minting failed
+      $or: [
+        { 'nft.tokenId': { $regex: /^NFT-/ } }, // Placeholder tokenId pattern
+        { 'nft.contractAddress': { $in: ['TBD', null, ''] } }, // Missing contract address
+        { 'nft.openSeaUrl': { $exists: false } }, // No OpenSea URL
+      ],
     };
 
     if (landSlotId) {
@@ -70,7 +73,41 @@ const retryFailedNFTMints = async () => {
       console.log('🔍 Finding all deeds with failed NFT mints...');
     }
 
-    const deedsToRetry = await Deed.find(query);
+    // First, try to find by exact landSlotId if provided
+    let deedsToRetry: any[] = [];
+    if (landSlotId) {
+      const deedByLandSlotId = await Deed.findOne({ landSlotId: landSlotId });
+      if (deedByLandSlotId) {
+        console.log(`✅ Found deed by landSlotId: ${landSlotId}`);
+        console.log(`   Deed ID: ${deedByLandSlotId._id}`);
+        console.log(`   Current tokenId: ${deedByLandSlotId.nft.tokenId}`);
+        console.log(`   Current contractAddress: ${deedByLandSlotId.nft.contractAddress}`);
+        console.log(`   Current blockchain: ${deedByLandSlotId.nft.blockchain}`);
+        console.log(`   Current openSeaUrl: ${deedByLandSlotId.nft.openSeaUrl || 'Not set'}`);
+        console.log(`   Current mintTxHash: ${deedByLandSlotId.nft.mintTxHash || 'Not set'}`);
+        
+        // Check if it needs updating
+        const needsUpdate = 
+          deedByLandSlotId.nft.tokenId?.startsWith('NFT-') ||
+          deedByLandSlotId.nft.contractAddress === 'TBD' ||
+          !deedByLandSlotId.nft.openSeaUrl ||
+          deedByLandSlotId.nft.blockchain === 'TRON'; // TRON deeds should be migrated to POLYGON
+        
+        if (needsUpdate) {
+          deedsToRetry = [deedByLandSlotId];
+          console.log(`   ✅ Needs update: ${needsUpdate ? 'Yes' : 'No'}`);
+        } else {
+          console.log(`   ℹ️  Deed already has proper NFT data`);
+        }
+      } else {
+        console.log(`❌ Deed not found with landSlotId: ${landSlotId}`);
+      }
+    }
+    
+    // If not found by specific landSlotId or no landSlotId provided, use the query
+    if (deedsToRetry.length === 0) {
+      deedsToRetry = await Deed.find(query);
+    }
 
     if (deedsToRetry.length === 0) {
       console.log('✅ No deeds found that need NFT minting retry');
@@ -128,8 +165,15 @@ const retryFailedNFTMints = async () => {
           throw new Error('MongoDB connection not established');
         }
         
-        await mongoose.connection.db.collection('deeds').updateOne(
-          { _id: deed._id },
+        // Ensure _id is properly formatted for MongoDB
+        const deedObjectId = typeof deed._id === 'string' 
+          ? new mongoose.Types.ObjectId(deed._id)
+          : deed._id;
+
+        console.log(`   Updating deed in database (ID: ${deedObjectId})...`);
+        
+        const updateResult = await mongoose.connection.db.collection('deeds').updateOne(
+          { _id: deedObjectId },
           {
             $set: {
               'nft.tokenId': mintResult.tokenId.toString(),
@@ -138,13 +182,46 @@ const retryFailedNFTMints = async () => {
               'nft.standard': 'ERC721',
               'nft.mintTxHash': mintResult.transactionHash,
               'nft.openSeaUrl': openSeaUrl,
+              updatedAt: new Date(),
             },
           }
         );
+        
+        console.log(`   Update result: matched=${updateResult.matchedCount}, modified=${updateResult.modifiedCount}`);
 
-        console.log(`✅ Successfully minted NFT for ${deed.landSlotId}`);
-        console.log(`   TokenId: ${mintResult.tokenId}`);
-        console.log(`   OpenSea: ${openSeaUrl}`);
+        if (updateResult.matchedCount === 0) {
+          throw new Error(`Deed not found in database (ID: ${deed._id})`);
+        }
+        
+        if (updateResult.modifiedCount === 0) {
+          console.warn(`⚠️  Deed ${deed.landSlotId} was not modified (might already be updated)`);
+          
+          // Verify the current state
+          const updatedDeed = await Deed.findById(deed._id);
+          if (updatedDeed) {
+            console.log(`   Current tokenId: ${updatedDeed.nft.tokenId}`);
+            console.log(`   Current openSeaUrl: ${updatedDeed.nft.openSeaUrl || 'Not set'}`);
+            
+            // If values don't match, something went wrong
+            if (updatedDeed.nft.tokenId !== mintResult.tokenId.toString()) {
+              throw new Error(`TokenId mismatch: expected ${mintResult.tokenId}, found ${updatedDeed.nft.tokenId}`);
+            }
+          }
+        }
+
+        // Verify the update by reading back the deed
+        const updatedDeed = await mongoose.connection.db.collection('deeds').findOne({ _id: deedObjectId });
+        if (updatedDeed) {
+          console.log(`✅ Successfully minted NFT for ${deed.landSlotId}`);
+          console.log(`   TokenId: ${updatedDeed.nft.tokenId}`);
+          console.log(`   Contract: ${updatedDeed.nft.contractAddress}`);
+          console.log(`   Blockchain: ${updatedDeed.nft.blockchain}`);
+          console.log(`   OpenSea: ${updatedDeed.nft.openSeaUrl || 'Not set'}`);
+          console.log(`   Mint Tx: ${updatedDeed.nft.mintTxHash || 'Not set'}`);
+        } else {
+          throw new Error('Failed to verify deed update');
+        }
+        
         successCount++;
       } catch (error: any) {
         console.error(`❌ Failed to mint NFT for ${deed.landSlotId}:`, error.message);

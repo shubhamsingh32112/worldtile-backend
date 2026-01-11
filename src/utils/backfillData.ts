@@ -22,6 +22,7 @@ import Deed from '../models/Deed.model';
 import UserLand from '../models/UserLand.model';
 import LandSlot from '../models/LandSlot.model';
 import { connectMongoDB } from '../config/mongodb';
+import { generateSealNumber } from './sealNumberGenerator';
 
 /**
  * Fix 1: Add role: "AGENT" to users with agentProfile but missing role
@@ -153,8 +154,8 @@ const createMissingDeeds = async (): Promise<void> => {
       
       try {
         // Generate seal number (unique identifier for deed)
-        // Format: WT-{LAND_SLOT_ID}-{TIMESTAMP}
-        const sealNo = `WT-${landSlotId.toUpperCase().replace(/_/g, '-')}-${Date.now()}`;
+        // Format: WT-XXXX (random 4-digit number)
+        const sealNo = await generateSealNumber();
         
         // Create deed with required fields
         const deed = new Deed({
