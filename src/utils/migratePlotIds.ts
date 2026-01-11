@@ -2,7 +2,6 @@ import mongoose from 'mongoose';
 import dotenv from 'dotenv';
 import LandSlot from '../models/LandSlot.model';
 import Deed from '../models/Deed.model';
-import UserLand from '../models/UserLand.model';
 
 // Load environment variables
 dotenv.config();
