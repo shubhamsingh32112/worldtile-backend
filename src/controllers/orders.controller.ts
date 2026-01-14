@@ -48,6 +48,7 @@ export class OrdersController {
         network: result.network,
         assignedSlots: result.assignedSlots, // Return assigned slots for reference
         expiresAt: result.order.expiry?.expiresAt || result.order.expiresAt, // Return expiry timestamp
+        pricing: result.order.pricing, // Include pricing breakdown (base, discount, final)
       });
     } catch (error: any) {
       // Use status code from AppError if available, otherwise determine from message
@@ -132,16 +133,18 @@ export class OrdersController {
           place: order.place,
           landSlotIds: order.landSlotIds,
           quantity: order.quantity,
-          expectedAmountUSDT: order.expectedAmountUSDT,
+          expectedAmountUSDT: order.payment?.expectedAmountUSDT || order.expectedAmountUSDT,
           usdtAddress: order.usdtAddress,
           network: order.network,
           status: order.status,
-          txHash: order.txHash,
-          confirmations: order.confirmations,
+          txHash: order.payment?.txHash || order.txHash,
+          confirmations: order.payment?.confirmations || order.confirmations,
           nft: order.nft,
           createdAt: order.createdAt,
-          paidAt: order.paidAt,
+          paidAt: order.payment?.paidAt || order.paidAt,
           expiresAt: order.expiry?.expiresAt || order.expiresAt, // Return expiry timestamp
+          referral: order.referral, // Include referral info
+          pricing: order.pricing, // Include pricing breakdown (base, discount, final)
         },
       });
     } catch (error: any) {
@@ -299,6 +302,55 @@ export class OrdersController {
       return res.status(statusCode).json({
         success: false,
         message: error.message || 'Failed to auto-verify payment',
+        error: process.env.NODE_ENV === 'development' ? error.message : undefined,
+      });
+    }
+  }
+
+  /**
+   * Add referral to an order (ONE TIME ONLY)
+   * POST /api/orders/:orderId/add-referral
+   */
+  static async addReferralToOrder(req: AuthRequest, res: Response): Promise<Response> {
+    try {
+      const userId = req.user!.id;
+      const { orderId } = req.params;
+      const { referralCode } = req.body;
+
+      if (!referralCode || typeof referralCode !== 'string' || !referralCode.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: 'Referral code is required',
+        });
+      }
+
+      const order = await OrdersService.addReferralToOrder(userId, orderId, referralCode);
+
+      return res.status(200).json({
+        success: true,
+        message: 'Referral applied successfully',
+        order: {
+          _id: order._id,
+          referral: order.referral,
+          pricing: order.pricing, // Include updated pricing with discount
+          expectedAmountUSDT: order.payment?.expectedAmountUSDT || order.expectedAmountUSDT, // Updated amount
+        },
+      });
+    } catch (error: any) {
+      console.error('Add referral to order error:', error);
+
+      const statusCode = error.message.includes('not found') ||
+                        error.message.includes('already') ||
+                        error.message.includes('Cannot add referral') ||
+                        error.message.includes('Invalid referral code') ||
+                        error.message.includes('Cannot refer yourself') ||
+                        error.message.includes('Referral loop')
+        ? 400
+        : 500;
+
+      return res.status(statusCode).json({
+        success: false,
+        message: error.message || 'Failed to add referral',
         error: process.env.NODE_ENV === 'development' ? error.message : undefined,
       });
     }

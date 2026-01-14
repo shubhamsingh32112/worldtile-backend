@@ -28,6 +28,12 @@ export interface IReferral {
   commissionAmountUSDT?: string; // Calculated commission amount
 }
 
+export interface IPricing {
+  baseAmountUSDT: string; // Base amount before discount (quantity * 110)
+  discountUSDT: string; // Discount amount (5.000000 if user.referredBy exists, 0.000000 otherwise)
+  finalAmountUSDT: string; // Final amount after discount (baseAmount - discount, min 0)
+}
+
 export interface IOrder extends Document {
   userId: mongoose.Types.ObjectId;
   state: string; // stateKey
@@ -42,6 +48,7 @@ export interface IOrder extends Document {
   payment: IPayment;
   expiry: IExpiry;
   referral?: IReferral;
+  pricing?: IPricing; // Pricing snapshot (base, discount, final)
   
   // Legacy fields (kept for backward compatibility)
   expectedAmountUSDT?: string; // @deprecated - use payment.expectedAmountUSDT
@@ -186,6 +193,21 @@ const OrderSchema = new Schema<IOrder>(
         immutable: true, // Immutable snapshot of commission amount
       },
     },
+    // New nested pricing structure (SNAPSHOT - updated when referral added, immutable after payment)
+    pricing: {
+      baseAmountUSDT: {
+        type: String,
+        default: null,
+      },
+      discountUSDT: {
+        type: String,
+        default: null,
+      },
+      finalAmountUSDT: {
+        type: String,
+        default: null,
+      },
+    },
     // Legacy fields (kept for backward compatibility - will be populated from nested structures)
     expectedAmountUSDT: {
       type: String,
@@ -238,12 +260,27 @@ const OrderSchema = new Schema<IOrder>(
   }
 );
 
-// Prevent updates to referral field after order creation (immutable snapshot)
+// Prevent UPDATES to referral field after it's set (but allow initial SET while order is PENDING)
 OrderSchema.pre(['updateOne', 'findOneAndUpdate', 'updateMany'], function (next) {
   const update = this.getUpdate() as any;
-  // Block any attempt to modify referral field
+  const query = this.getQuery() as any;
+  
+  // Only check if we're trying to set/update referral field
   if (update && (update.referral || update.$set?.referral)) {
-    return next(new Error('Referral field is immutable and cannot be updated after order creation'));
+    // Allow if query explicitly checks that referral.referrerId doesn't exist or is null
+    // This means we're SETTING referral for the first time (not UPDATING)
+    const isSettingInitialReferral = query.$or && Array.isArray(query.$or) && 
+      query.$or.some((cond: any) => 
+        cond['referral.referrerId'] && (
+          cond['referral.referrerId'].$exists === false || 
+          cond['referral.referrerId'] === null
+        )
+      );
+    
+    if (!isSettingInitialReferral) {
+      // Block UPDATE of existing referral (immutable after set)
+      return next(new Error('Referral field is immutable and cannot be updated after order creation'));
+    }
   }
   next();
 });

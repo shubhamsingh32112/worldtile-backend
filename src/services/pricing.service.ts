@@ -16,6 +16,31 @@ export class PricingService {
   }
 
   /**
+   * Calculate pricing with discount for referred users
+   * @param quantity - Number of tiles
+   * @param hasReferral - Whether user has referredBy (user.referredBy != null)
+   * @returns Pricing breakdown: { baseAmountUSDT, discountUSDT, finalAmountUSDT }
+   */
+  static calculatePricing(quantity: number, hasReferral: boolean): {
+    baseAmountUSDT: string;
+    discountUSDT: string;
+    finalAmountUSDT: string;
+  } {
+    const PRICE_PER_TILE = 110;
+    const REFERRAL_DISCOUNT = 5.0; // $5 discount for referred users
+    
+    const baseAmount = quantity * PRICE_PER_TILE;
+    const discount = hasReferral ? REFERRAL_DISCOUNT : 0;
+    const finalAmount = Math.max(baseAmount - discount, 0); // Ensure non-negative
+    
+    return {
+      baseAmountUSDT: baseAmount.toFixed(6),
+      discountUSDT: discount.toFixed(6),
+      finalAmountUSDT: finalAmount.toFixed(6),
+    };
+  }
+
+  /**
    * Get USDT address from environment
    * @returns Ledger USDT TRC20 address
    * @throws Error if address is not configured

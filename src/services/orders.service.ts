@@ -1,3 +1,4 @@
+import mongoose from 'mongoose';
 import Order from '../models/Order.model';
 import Area from '../models/Area.model';
 import State from '../models/State.model';
@@ -97,20 +98,23 @@ export class OrdersService {
       throw new Error('Area not found or not enabled');
     }
 
-    // Calculate price server-side (price per tile * quantity)
-    const pricePerTile = await PricingService.calculateUSDTAmount();
-    const totalAmount = (parseFloat(pricePerTile) * quantity).toFixed(6);
+    // Get user to check referral info (before pricing calculation)
+    const user = await User.findById(userId);
+    if (!user) {
+      throw new Error('User not found');
+    }
+
+    // Calculate pricing with discount (if user has referral)
+    const hasReferral = !!user.referredBy;
+    const pricing = PricingService.calculatePricing(quantity, hasReferral);
+    
+    // Use finalAmount as the expected amount (after discount)
+    const totalAmount = pricing.finalAmountUSDT;
     const usdtAddress = PricingService.getUSDTAddress();
 
     // Create order with 15 minute expiry
     const expiresAt = new Date();
     expiresAt.setMinutes(expiresAt.getMinutes() + 15); // 15 minutes from now
-
-    // Get user to check referral info
-    const user = await User.findById(userId);
-    if (!user) {
-      throw new Error('User not found');
-    }
 
     // Set up referral info (if user was referred)
     let referralInfo: any = null;
@@ -121,14 +125,15 @@ export class OrdersService {
       }
 
       // Default commission rate is 25% (0.25)
+      // Commission is calculated on paidAmountUSDT (final amount after discount)
+      // This is handled in paymentVerification service
       const commissionRate = 0.25;
-      const commissionAmount = (parseFloat(totalAmount) * commissionRate).toFixed(6);
 
       referralInfo = {
         referrerId: user.referredBy,
         commissionRate: commissionRate,
         commissionRateAtPurchase: commissionRate, // Immutable snapshot
-        commissionAmountUSDT: commissionAmount,
+        // commissionAmountUSDT will be calculated on paidAmountUSDT during payment verification
       };
     }
 
@@ -154,13 +159,18 @@ export class OrdersService {
       status: 'PENDING',
       // New nested structures
       payment: {
-        expectedAmountUSDT: totalAmount,
+        expectedAmountUSDT: totalAmount, // Final amount after discount
         confirmations: 0,
       },
       expiry: {
         expiresAt: expiresAt,
       },
       referral: referralInfo,
+      pricing: {
+        baseAmountUSDT: pricing.baseAmountUSDT,
+        discountUSDT: pricing.discountUSDT,
+        finalAmountUSDT: pricing.finalAmountUSDT,
+      },
       // Legacy fields (for backward compatibility)
       expectedAmountUSDT: totalAmount,
       confirmations: 0,
@@ -420,6 +430,163 @@ export class OrdersService {
       ...result,
       txHash: txHash || undefined,
     };
+  }
+
+  /**
+   * Add referral to an order (ONE TIME ONLY, before payment)
+   * Uses atomic operations and transaction to prevent race conditions
+   * @param userId - User ID
+   * @param orderId - Order ID
+   * @param referralCode - Referral code to apply
+   * @returns Updated order
+   * @throws Error if validation fails
+   */
+  static async addReferralToOrder(
+    userId: string,
+    orderId: string,
+    referralCode: string
+  ): Promise<any> {
+    const normalizedCode = referralCode.trim().toUpperCase();
+
+    // Validate order exists and belongs to user
+    const order = await Order.findOne({
+      _id: orderId,
+      userId: userId,
+    });
+
+    if (!order) {
+      throw new Error('Order not found');
+    }
+
+    // Rule: Order must be PENDING
+    if (order.status !== 'PENDING') {
+      throw new Error('Cannot add referral. Order is not pending.');
+    }
+
+    // Rule: Order must NOT already have referral
+    if (order.referral && order.referral.referrerId) {
+      throw new Error('Referral already locked. Cannot change.');
+    }
+
+    // Find referrer by referral code (before transaction)
+    const referrer = await User.findOne({
+      referralCode: normalizedCode,
+    });
+
+    if (!referrer) {
+      throw new Error('Invalid referral code');
+    }
+
+    // Hard rule: Cannot refer yourself
+    if (referrer._id.toString() === userId) {
+      throw new Error('Cannot refer yourself');
+    }
+
+    // Hard rule: Prevent referral loops (A → B → A)
+    // If the referrer was referred by the current user, applying their code would create a loop
+    if (referrer.referredBy) {
+      const referrerOfReferrer = await User.findById(referrer.referredBy);
+      if (referrerOfReferrer && referrerOfReferrer._id.toString() === userId) {
+        throw new Error('Cannot apply this referral code. This user was referred by you, which would create a referral loop.');
+      }
+    }
+
+    // Recalculate pricing with discount (user now has referral)
+    // User.referredBy will be set, so they get $5 discount
+    const newPricing = PricingService.calculatePricing(order.quantity, true); // hasReferral = true (just added)
+    const commissionRate = 0.25; // Default 25%
+    // Commission will be calculated on paidAmountUSDT during payment verification
+
+    // 🔒 TRANSACTION: All operations must succeed or all fail
+    const session = await mongoose.startSession();
+    session.startTransaction();
+
+    try {
+      // 1️⃣ ATOMIC: Set user.referredBy ONLY if it's null (prevents race condition)
+      // Use direct MongoDB collection update to bypass Mongoose immutable field restrictions
+      const db = mongoose.connection.db;
+      if (!db) {
+        await session.abortTransaction();
+        session.endSession();
+        throw new Error('Database connection not available');
+      }
+      const usersCollection = db.collection('users');
+      
+      const userUpdateResult = await usersCollection.updateOne(
+        { _id: new mongoose.Types.ObjectId(userId), referredBy: null },
+        { $set: { referredBy: new mongoose.Types.ObjectId(referrer._id) } },
+        { session }
+      );
+
+      if (userUpdateResult.matchedCount === 0 || userUpdateResult.modifiedCount === 0) {
+        await session.abortTransaction();
+        session.endSession();
+        throw new Error('User already has a referral. Cannot change.');
+      }
+
+      // 2️⃣ ATOMIC: Set order.referral AND update pricing/discount (prevents race condition)
+      const orderUpdated = await Order.findOneAndUpdate(
+        { 
+          _id: orderId,
+          userId: userId,
+          status: 'PENDING',
+          $or: [
+            { 'referral.referrerId': { $exists: false } },
+            { 'referral.referrerId': null },
+          ],
+        },
+        {
+          $set: {
+            referral: {
+              referrerId: referrer._id,
+              commissionRate: commissionRate,
+              commissionRateAtPurchase: commissionRate,
+              // commissionAmountUSDT will be calculated on paidAmountUSDT during payment verification
+            },
+            pricing: {
+              baseAmountUSDT: newPricing.baseAmountUSDT,
+              discountUSDT: newPricing.discountUSDT,
+              finalAmountUSDT: newPricing.finalAmountUSDT,
+            },
+            'payment.expectedAmountUSDT': newPricing.finalAmountUSDT, // Update expected amount with discount
+          },
+        },
+        { session, new: true }
+      );
+
+      if (!orderUpdated) {
+        await session.abortTransaction();
+        session.endSession();
+        throw new Error('Order referral already set or order is not pending.');
+      }
+
+      // Also update legacy expectedAmountUSDT field (for backward compatibility)
+      await Order.findByIdAndUpdate(
+        orderId,
+        { expectedAmountUSDT: newPricing.finalAmountUSDT },
+        { session }
+      );
+
+      // 3️⃣ Increment referrer's totalReferrals count
+      await User.findByIdAndUpdate(
+        referrer._id,
+        { $inc: { 'referralStats.totalReferrals': 1 } },
+        { session }
+      );
+
+      // Commit transaction
+      await session.commitTransaction();
+      session.endSession();
+
+      // Reload order to get all updated fields
+      const updatedOrder = await Order.findById(orderId);
+      return updatedOrder || orderUpdated;
+    } catch (error: any) {
+      // Abort transaction on any error
+      await session.abortTransaction();
+      session.endSession();
+      throw error;
+    }
   }
 }
 

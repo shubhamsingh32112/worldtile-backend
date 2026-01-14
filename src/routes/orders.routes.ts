@@ -83,6 +83,17 @@ router.get(
 );
 
 /**
+ * @route   POST /api/orders/:orderId/add-referral
+ * @desc    Add referral code to an order (ONE TIME ONLY, before payment)
+ * @access  Private
+ */
+router.post(
+  '/:orderId/add-referral',
+  authenticate,
+  OrdersController.addReferralToOrder
+);
+
+/**
  * @route   GET /api/orders/:orderId
  * @desc    Get a specific order by ID
  * @access  Private
